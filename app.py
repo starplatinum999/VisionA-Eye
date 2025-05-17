@@ -226,8 +226,14 @@ elif st.session_state.current_tab == "Surveillance View":
                         use_tracker = st.checkbox("Enable object tracking", value=True,
                                                help="Disable to use placeholder tracking")
                         
-                        use_reasoner = st.checkbox("Enable AI reasoning", value=True,
-                                                help="Disable if the LLM causes issues")
+                        use_reasoner = st.checkbox("Enable AI reasoning", value=False,
+                                                help="Keep disabled for real-time processing, use in Analytics instead")
+                        
+                        process_mode = st.radio(
+                            "Processing Mode",
+                            ["Process and Save", "Real-time Processing"],
+                            help="Process and Save creates a video file with processing, Real-time processes the video as it plays"
+                        )
                     
                     # Add a bypass option with a more prominent display
                     col1, col2 = st.columns(2)
@@ -330,24 +336,126 @@ elif st.session_state.current_tab == "Surveillance View":
                                     }
                                     
                                     # Run the video processing with the safe progress callback
-                                    st.session_state.processed_video, st.session_state.events = process_video(
-                                        st.session_state.video_path,
-                                        detector,
-                                        tracker,
-                                        st.session_state.roi_areas,
-                                        reasoner,
-                                        timeout=timeout,
-                                        skip_frames=process_every_n_frames,
-                                        progress_callback=safe_progress_update,
-                                        show_live=True
-                                    )
-                                    
-                                    # Display final progress
-                                    progress_bar.progress(100)
-                                    status_text.text(f"Completed processing {st.session_state.progress_total} frames in {st.session_state.progress_time:.1f} seconds")
-                                    st.success("Video processed successfully!")
-                                    st.rerun()
-                                    
+                                    if process_mode == "Process and Save":
+                                        st.session_state.processed_video, st.session_state.events = process_video(
+                                            st.session_state.video_path,
+                                            detector,
+                                            tracker,
+                                            st.session_state.roi_areas,
+                                            reasoner if use_reasoner else None,
+                                            timeout=timeout,
+                                            skip_frames=process_every_n_frames,
+                                            progress_callback=safe_progress_update,
+                                            show_live=True
+                                        )
+                                        
+                                        # Display final progress
+                                        progress_bar.progress(100)
+                                        status_text.text(f"Completed processing {st.session_state.progress_total} frames in {st.session_state.progress_time:.1f} seconds")
+                                        st.success("Video processed successfully!")
+                                        st.rerun()
+                                    else:
+                                        # Real-time processing mode
+                                        st.info("Starting real-time video processing. The video will play with detection and tracking directly.")
+                                        
+                                        # Play the video directly with real-time processing
+                                        video_container = st.empty()
+                                        events_container = st.empty()
+                                        
+                                        # Process video in real-time
+                                        import cv2
+                                        from app.utils.video_utils import get_frame_thumbnail
+                                        
+                                        # Open video
+                                        cap = cv2.VideoCapture(st.session_state.video_path)
+                                        if not cap.isOpened():
+                                            st.error(f"Error opening video: {st.session_state.video_path}")
+                                        else:
+                                            # Get video properties
+                                            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                                            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                                            fps = cap.get(cv2.CAP_PROP_FPS) or 25
+                                            frame_delay = int(1000 / fps)
+                                            
+                                            # Track events and objects
+                                            live_events = []
+                                            live_tracks = {}
+                                            frame_idx = 0
+                                            
+                                            # Process frames in a loop
+                                            with st.spinner("Processing video in real-time..."):
+                                                while cap.isOpened():
+                                                    ret, frame = cap.read()
+                                                    if not ret:
+                                                        break
+                                                    
+                                                    # Skip frames if needed
+                                                    if process_every_n_frames and frame_idx % 2 == 1:
+                                                        frame_idx += 1
+                                                        continue
+                                                    
+                                                    # Detect objects
+                                                    detections = detector.detect(frame) if use_detector else []
+                                                    
+                                                    # Track objects
+                                                    tracks_updated = tracker.update(frame, detections) if use_tracker else []
+                                                    
+                                                    # Process tracked objects (simplified)
+                                                    for track_id, bbox, class_id, confidence in tracks_updated:
+                                                        x1, y1, x2, y2 = map(int, bbox)
+                                                        
+                                                        # Draw bounding box with class color
+                                                        class_names = {0: "Person", 1: "Cart", 2: "Bag", 3: "Product"}
+                                                        class_name = class_names.get(class_id, f"Class-{class_id}")
+                                                        label = f"{class_name} #{track_id}"
+                                                        
+                                                        # Colors for different classes
+                                                        colors = {
+                                                            0: (0, 255, 0),    # Person: Green
+                                                            1: (255, 0, 0),    # Cart: Blue
+                                                            2: (0, 0, 255),    # Bag: Red
+                                                            3: (255, 255, 0)   # Product: Cyan
+                                                        }
+                                                        color = colors.get(class_id, (200, 200, 200))
+                                                        
+                                                        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                                                        cv2.putText(frame, label, (x1, y1 - 10), 
+                                                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                                                    
+                                                    # Draw ROI areas
+                                                    for roi_name, (rx1, ry1, rx2, ry2) in st.session_state.roi_areas.items():
+                                                        cv2.rectangle(frame, (rx1, ry1), (rx2, ry2), (255, 0, 0), 2)
+                                                        cv2.putText(frame, roi_name, (rx1, ry1 - 10), 
+                                                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                                                    
+                                                    # Add frame counter
+                                                    cv2.putText(frame, f"Frame: {frame_idx}", (10, 30), 
+                                                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                                                    
+                                                    # Display frame
+                                                    video_container.image(frame, channels="BGR", caption=f"Live Processing", use_column_width=True)
+                                                    
+                                                    # Collect events (simplified for demo)
+                                                    if frame_idx % 30 == 0:  # Show events every second
+                                                        live_events_text = "\n".join([f"Event: {e['type']} - {e['description']}" 
+                                                                                     for e in live_events[-5:]])
+                                                        events_container.text(live_events_text)
+                                                    
+                                                    # Update frame index
+                                                    frame_idx += 1
+                                                    
+                                                    # Update progress callback
+                                                    if frame_idx % 10 == 0 and safe_progress_update:
+                                                        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                                                        progress = (frame_idx / max(total_frames, 1)) * 100
+                                                        elapsed_time = time.time() - start_time
+                                                        safe_progress_update(progress, frame_idx, total_frames, elapsed_time)
+                                            
+                                            # Store events for analytics
+                                            st.session_state.events = live_events
+                                            st.session_state.processed_video = st.session_state.video_path  # Use original
+                                            st.success(f"Completed real-time processing of {frame_idx} frames.")
+                                            cap.release()
                                 except Exception as e:
                                     import traceback
                                     error_details = traceback.format_exc()
@@ -373,10 +481,6 @@ elif st.session_state.current_tab == "Surveillance View":
                             st.error(f"Unexpected error: {outer_e}")
                             
                             # Fallback to original video
-                            if st.button("Use Original Video (Fallback)"):
-                                st.session_state.processed_video = st.session_state.video_path
-                                st.session_state.events = []
-                                st.rerun()
             except Exception as e:
                 import traceback
                 st.error(f"Error in video processing: {str(e)}")
@@ -414,7 +518,16 @@ elif st.session_state.current_tab == "Analytics Dashboard":
             st.session_state.current_tab = "Surveillance View"
             st.rerun()
     else:
-        analytics = AnalyticsManager(st.session_state.events, st.session_state.roi_areas)
+        # Create a reasoner for analytics (not used in real-time processing)
+        try:
+            from app.components.symbolic_reasoning.llm_reasoning import SymbolicReasoner
+            analytics_reasoner = SymbolicReasoner()
+            st.success("🧠 LLM reasoning engine loaded for analytics")
+        except Exception as e:
+            st.warning(f"⚠️ Could not load LLM reasoning: {e}")
+            analytics_reasoner = None
+        
+        analytics = AnalyticsManager(st.session_state.events, st.session_state.roi_areas, reasoner=analytics_reasoner)
         analytics.display_dashboard()
 
 # Footer

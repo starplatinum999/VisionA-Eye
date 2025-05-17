@@ -6,26 +6,135 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import cv2
 import os
+import json
+import tempfile
 from collections import Counter
 
 class AnalyticsManager:
     """
     Analytics manager for generating visualizations and reports
     """
-    def __init__(self, events, roi_areas):
+    def __init__(self, events, roi_areas, reasoner=None):
         """
         Initialize analytics manager
         
         Args:
             events: List of events from video processing
             roi_areas: Dictionary of ROI areas {name: [x1, y1, x2, y2]}
+            reasoner: SymbolicReasoner instance (optional, for generating insights)
         """
         self.events = events
         self.roi_areas = roi_areas
+        self.reasoner = reasoner
         
         # Process events into DataFrame for easier analysis
         self.events_df = self._process_events()
+        
+        # Apply reasoning to events that need it (if reasoner is available)
+        if reasoner:
+            self._apply_delayed_reasoning()
     
+    def _apply_delayed_reasoning(self):
+        """
+        Apply LLM reasoning to events that were marked for delayed reasoning
+        """
+        # Check if reasoner is available
+        if not self.reasoner:
+            return
+            
+        # Look for events that need reasoning
+        reasoning_data_path = os.path.join(tempfile.gettempdir(), "events_needing_reasoning.json")
+        
+        try:
+            # Check if we have stored indices of events needing reasoning
+            if os.path.exists(reasoning_data_path):
+                with open(reasoning_data_path, 'r') as f:
+                    indices = json.load(f)
+                
+                # Display progress
+                st.info("Generating AI insights for events...")
+                progress = st.progress(0)
+                
+                # Process each event
+                for i, idx in enumerate(indices):
+                    if idx < len(self.events):
+                        event = self.events[idx]
+                        
+                        # Make sure event needs reasoning and doesn't already have it
+                        if event.get('needs_reasoning', False) and 'reasoning' not in event:
+                            # Find track data
+                            track_id = event.get('track_id')
+                            track_data = None
+                            
+                            # Try to reconstruct track data
+                            if track_id is not None:
+                                # Find all events for this track
+                                track_events = [e for e in self.events if e.get('track_id') == track_id]
+                                
+                                # Construct minimal track data
+                                track_data = {
+                                    'id': track_id,
+                                    'events': track_events,
+                                    'class_id': 0  # Assume person
+                                }
+                            
+                            # Apply reasoning
+                            try:
+                                if event['type'] == 'Potential Theft':
+                                    event['reasoning'] = self.reasoner.analyze_event(event, track_data or {})
+                                elif event['type'] == 'Long Dwell Time':
+                                    event['reasoning'] = self.reasoner.analyze_dwell_time(event, track_data or {})
+                                else:
+                                    event['reasoning'] = self.reasoner.analyze_event(event, track_data or {})
+                            except Exception as e:
+                                event['reasoning'] = f"Error in reasoning: {e}"
+                    
+                    # Update progress
+                    progress.progress((i + 1) / len(indices))
+                
+                # Clean up the file after processing
+                try:
+                    os.remove(reasoning_data_path)
+                except:
+                    pass
+                    
+                st.success("AI insights generation complete!")
+            
+            # Alternatively, just check all events with needs_reasoning flag
+            else:
+                reasoning_needed = [i for i, event in enumerate(self.events) 
+                                     if event.get('needs_reasoning', False) and 'reasoning' not in event]
+                
+                if reasoning_needed:
+                    # Display progress
+                    st.info("Generating AI insights for events...")
+                    progress = st.progress(0)
+                    
+                    for i, idx in enumerate(reasoning_needed):
+                        event = self.events[idx]
+                        
+                        # Find track data (minimal reconstruction)
+                        track_id = event.get('track_id')
+                        track_data = {'id': track_id, 'class_id': 0}  # Assume person
+                        
+                        # Apply reasoning
+                        try:
+                            if event['type'] == 'Potential Theft':
+                                event['reasoning'] = self.reasoner.analyze_event(event, track_data)
+                            elif event['type'] == 'Long Dwell Time':
+                                event['reasoning'] = self.reasoner.analyze_dwell_time(event, track_data)
+                            else:
+                                event['reasoning'] = self.reasoner.analyze_event(event, track_data)
+                        except Exception as e:
+                            event['reasoning'] = f"Error in reasoning: {e}"
+                        
+                        # Update progress
+                        progress.progress((i + 1) / len(reasoning_needed))
+                    
+                    st.success("AI insights generation complete!")
+        except Exception as e:
+            st.warning(f"Error applying reasoning to events: {e}")
+            
     def _process_events(self):
         """
         Process events into a DataFrame
