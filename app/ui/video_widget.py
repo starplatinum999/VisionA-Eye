@@ -3,9 +3,12 @@ import numpy as np
 from datetime import datetime, timedelta
 import time
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
-from PySide6.QtCore import QTimer, Qt, Signal, Slot
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, 
+    QFrame, QProgressBar, QSizePolicy, QSlider
+)
+from PySide6.QtCore import QTimer, Qt, Signal, Slot, QSize
+from PySide6.QtGui import QImage, QPixmap, QFont, QColor, QPalette
 
 from app.components.detection.detector import YOLODetector
 from app.components.tracking.tracker import DeepSORTTracker
@@ -19,28 +22,197 @@ class VideoWidget(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        
+        # Main layout
         self.layout = QVBoxLayout()
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(10)
         self.setLayout(self.layout)
         
+        # Video display container with border
+        video_container = QFrame()
+        video_container.setStyleSheet("""
+            QFrame {
+                border: 2px solid #E5E7EB;
+                border-radius: 12px;
+                background-color: #111827;
+                padding: 5px;
+            }
+        """)
+        video_layout = QVBoxLayout(video_container)
+        video_layout.setContentsMargins(0, 0, 0, 0)
+        
         # Video display label
-        self.video_label = QLabel()
+        self.video_label = QLabel("Video feed will appear here")
         self.video_label.setAlignment(Qt.AlignCenter)
         self.video_label.setMinimumSize(640, 480)
-        self.layout.addWidget(self.video_label)
+        self.video_label.setStyleSheet("""
+            color: #9CA3AF;
+            font-size: 18px;
+            font-weight: bold;
+            background-color: #1F2937;
+        """)
+        video_layout.addWidget(self.video_label)
         
-        # Controls
-        self.controls_layout = QHBoxLayout()
+        self.layout.addWidget(video_container)
         
+        # Video information panel
+        info_panel = QFrame()
+        info_panel.setStyleSheet("""
+            QFrame {
+                background-color: #F3F4F6;
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
+        info_layout = QHBoxLayout(info_panel)
+        
+        # Frame counter
+        self.frame_counter = QLabel("Frame: 0 / 0")
+        self.frame_counter.setStyleSheet("""
+            font-size: 14px;
+            font-weight: bold;
+            color: #4B5563;
+        """)
+        info_layout.addWidget(self.frame_counter)
+        
+        # Timestamp
+        self.timestamp_label = QLabel("Time: 00:00:00")
+        self.timestamp_label.setStyleSheet("""
+            font-size: 14px;
+            font-weight: bold;
+            color: #4B5563;
+        """)
+        info_layout.addWidget(self.timestamp_label)
+        
+        # Detection counter
+        self.detection_counter = QLabel("Detections: 0")
+        self.detection_counter.setStyleSheet("""
+            font-size: 14px;
+            font-weight: bold;
+            color: #4B5563;
+        """)
+        info_layout.addWidget(self.detection_counter)
+        
+        # Add spacer to push info items left
+        info_layout.addStretch()
+        
+        self.layout.addWidget(info_panel)
+        
+        # Progress bar for video playback
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("%p%")
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #E5E7EB;
+                border-radius: 8px;
+                background-color: #F9FAFB;
+                height: 12px;
+                text-align: center;
+                color: #4B5563;
+                font-size: 12px;
+            }
+            QProgressBar::chunk {
+                background-color: #3B82F6;
+                border-radius: 7px;
+            }
+        """)
+        self.layout.addWidget(self.progress_bar)
+        
+        # Controls with modern styling
+        controls_container = QFrame()
+        controls_container.setStyleSheet("""
+            QFrame {
+                background-color: #FFFFFF;
+                border-radius: 10px;
+                border: 1px solid #E5E7EB;
+                padding: 10px;
+            }
+        """)
+        
+        self.controls_layout = QHBoxLayout(controls_container)
+        self.controls_layout.setContentsMargins(10, 10, 10, 10)
+        self.controls_layout.setSpacing(15)
+        
+        # Play/pause button with gradient styling
         self.play_button = QPushButton("Start Processing")
+        self.play_button.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                         stop:0 #4F46E5, stop:1 #4338CA);
+                color: white;
+                border-radius: 8px;
+                padding: 12px 24px;
+                font-weight: 600;
+                font-size: 14px;
+                min-width: 180px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                         stop:0 #6366F1, stop:1 #4F46E5);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                         stop:0 #4338CA, stop:1 #3730A3);
+            }
+        """)
         self.play_button.clicked.connect(self.toggle_play)
         self.controls_layout.addWidget(self.play_button)
         
+        # Stop button
         self.stop_button = QPushButton("Stop")
+        self.stop_button.setStyleSheet("""
+            QPushButton {
+                background-color: #F87171;
+                color: white;
+                border-radius: 8px;
+                padding: 12px 24px;
+                font-weight: 600;
+                font-size: 14px;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background-color: #EF4444;
+            }
+            QPushButton:pressed {
+                background-color: #DC2626;
+            }
+            QPushButton:disabled {
+                background-color: #D1D5DB;
+                color: #9CA3AF;
+            }
+        """)
         self.stop_button.clicked.connect(self.stop_video)
         self.stop_button.setEnabled(False)
         self.controls_layout.addWidget(self.stop_button)
         
-        self.layout.addLayout(self.controls_layout)
+        # Snapshot button
+        self.snapshot_button = QPushButton("Take Snapshot")
+        self.snapshot_button.setStyleSheet("""
+            QPushButton {
+                background-color: #10B981;
+                color: white;
+                border-radius: 8px;
+                padding: 12px 24px;
+                font-weight: 600;
+                font-size: 14px;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+            QPushButton:pressed {
+                background-color: #047857;
+            }
+        """)
+        self.snapshot_button.clicked.connect(self.take_snapshot)
+        self.controls_layout.addWidget(self.snapshot_button)
+        
+        # Add controls to main layout
+        self.layout.addWidget(controls_container)
         
         # Initialize video processing components
         self.detector = YOLODetector()
@@ -58,6 +230,7 @@ class VideoWidget(QWidget):
         self.is_playing = False
         self.current_frame = None
         self.base_time = datetime.now()
+        self.detection_count = 0
         
         # Tracking state
         self.tracks = {}
@@ -66,6 +239,30 @@ class VideoWidget(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(self.process_frame)
     
+    def take_snapshot(self):
+        """Save the current frame as an image file."""
+        if self.current_frame is not None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"snapshot_{timestamp}.jpg"
+            cv2.imwrite(filename, self.current_frame)
+            # Show confirmation
+            self.timestamp_label.setText(f"Snapshot saved: {filename}")
+            self.timestamp_label.setStyleSheet("""
+                font-size: 14px;
+                font-weight: bold;
+                color: #10B981;
+            """)
+            # Reset style after 2 seconds
+            QTimer.singleShot(2000, self.reset_timestamp_style)
+    
+    def reset_timestamp_style(self):
+        """Reset the timestamp label style after snapshot notification."""
+        self.timestamp_label.setStyleSheet("""
+            font-size: 14px;
+            font-weight: bold;
+            color: #4B5563;
+        """)
+        
     def load_video(self, video_path, is_camera=False):
         """Load a video file or camera feed."""
         self.video_path = video_path
@@ -128,6 +325,16 @@ class VideoWidget(QWidget):
             print("First frame read successfully")
             self.current_frame = frame
             self.display_frame(frame)
+            
+            # Update frame counter
+            self.frame_counter.setText(f"Frame: 1 / {self.total_frames if self.total_frames > 0 else 'Live'}")
+            
+            # Update progress bar for video files
+            if self.total_frames > 0:
+                self.progress_bar.setValue(0)
+            else:
+                # Hide progress bar for live feeds
+                self.progress_bar.setVisible(False)
         else:
             print("Failed to read first frame")
             raise ValueError("Failed to read first frame from video source")
@@ -136,6 +343,7 @@ class VideoWidget(QWidget):
         self.frame_count = 0
         self.tracks = {}
         self.base_time = datetime.now()
+        self.detection_count = 0
         
         # Set timer interval based on FPS
         self.timer.setInterval(int(1000 / self.fps))
@@ -198,43 +406,60 @@ class VideoWidget(QWidget):
         
         ret, frame = self.cap.read()
         if not ret:
-            # End of video
+            # End of video file
             self.stop_video()
             return
         
-        self.current_frame = frame.copy()
-        
-        # Process frame with YOLO detection
-        try:
-            detections = self.detector.detect(frame)
-        except Exception as e:
-            print(f"Detection error @ frame {self.frame_count}: {e}")
-            detections = []
-        
-        # Process detections with DeepSORT tracking
-        try:
-            tracks_updated = self.tracker.update(frame, detections)
-        except Exception as e:
-            print(f"Tracking error @ frame {self.frame_count}: {e}")
-            tracks_updated = []
-        
-        # Calculate current timestamp
-        timestamp = self.base_time + timedelta(seconds=self.frame_count / self.fps)
-        
-        # Process tracked objects to detect events
-        frame_events = self.process_tracks(tracks_updated, frame, timestamp)
-        
-        # Draw bounding boxes and ROIs on frame
-        self.draw_annotations(frame, tracks_updated, timestamp)
-        
-        # Display processed frame
-        self.display_frame(frame)
-        
-        # Emit events if any were detected
-        for event in frame_events:
-            self.event_detected.emit(event)
-        
+        # Update frame count
         self.frame_count += 1
+        
+        # Generate timestamp based on frame count and FPS
+        seconds = self.frame_count / self.fps
+        timestamp = self.base_time + timedelta(seconds=seconds)
+        
+        # Process frame with detector and tracker
+        try:
+            # Run object detection
+            detections = self.detector.detect(frame)
+            
+            # Update tracker
+            tracks_updated = self.tracker.update(frame, detections)
+            
+            # Process tracks
+            events = self.process_tracks(tracks_updated, frame, timestamp)
+            
+            # Update detection count
+            self.detection_count = len(detections)
+            self.detection_counter.setText(f"Detections: {self.detection_count}")
+            
+            # Emit events if any
+            for event in events:
+                self.event_detected.emit(event)
+            
+            # Draw annotations
+            processed_frame = self.draw_annotations(frame.copy(), tracks_updated, timestamp)
+            
+            # Display frame
+            self.display_frame_with_annotations(processed_frame)
+            
+            # Update progress bar for video files
+            if self.total_frames > 0:
+                progress = int((self.frame_count / self.total_frames) * 100)
+                self.progress_bar.setValue(progress)
+            
+            # Update frame counter
+            self.frame_counter.setText(f"Frame: {self.frame_count} / {self.total_frames if self.total_frames > 0 else 'Live'}")
+            
+            # Update timestamp
+            self.timestamp_label.setText(f"Time: {timestamp.strftime('%H:%M:%S')}")
+            
+        except Exception as e:
+            print(f"Error processing frame: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Store current frame
+        self.current_frame = frame
     
     def process_tracks(self, tracks_updated, frame, timestamp):
         """Process tracked objects to detect events."""
@@ -369,6 +594,8 @@ class VideoWidget(QWidget):
         # Show event count
         cv2.putText(frame, f"Events: {len(self.tracks)}", 
                    (10, frame.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        return frame
     
     def display_frame(self, frame):
         """Display the frame on the label."""

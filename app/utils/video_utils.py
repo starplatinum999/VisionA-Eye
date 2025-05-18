@@ -161,6 +161,7 @@ def process_video(video_path, detector, tracker, roi_areas, reasoner=None, timeo
                                 'thumbnail': get_frame_thumbnail(frame),
                                 'frame_idx': frame_idx,
                                 'track_id': track_id,
+                                'class_id': class_id,
                                 'from_roi': track['last_roi'],
                                 'to_roi': roi_name,
                                 'needs_reasoning': False
@@ -192,6 +193,7 @@ def process_video(video_path, detector, tracker, roi_areas, reasoner=None, timeo
                                                 'frame_idx': frame_idx,
                                                 'item_id': track_id,
                                                 'person_id': pid,
+                                                'class_id': class_id,
                                                 'needs_reasoning': False
                                             }
                                             frame_events.append(event_data)
@@ -204,6 +206,21 @@ def process_video(video_path, detector, tracker, roi_areas, reasoner=None, timeo
                     break
                 elif roi_name in track['roi_visits'] and track['roi_visits'][roi_name]['exit_frame'] is None:
                     track['roi_visits'][roi_name]['exit_frame'] = frame_idx
+
+            # For person tracks (class_id=0), add a person detection event periodically
+            # This ensures we have enough person events for accurate counting
+            if class_id == 0 and frame_idx % 30 == 0:  # Add an event every second (assuming 30fps)
+                person_event = {
+                    'type': 'Person Detected',
+                    'timestamp': timestamp.strftime('%H:%M:%S'),
+                    'description': f"Person ID {track_id} detected in frame",
+                    'thumbnail': get_frame_thumbnail(frame),
+                    'frame_idx': frame_idx,
+                    'track_id': track_id,
+                    'class_id': class_id,
+                    'needs_reasoning': False
+                }
+                frame_events.append(person_event)
 
             # Draw class name, track ID and confidence
             class_names = {0: "Person", 1: "Cart", 2: "Bag", 3: "Product"}
@@ -278,6 +295,7 @@ def process_video(video_path, detector, tracker, roi_areas, reasoner=None, timeo
                             'thumbnail': None,
                             'frame_idx': visit['enter_frame'],
                             'track_id': track_id,
+                            'class_id': 0,
                             'roi_name': roi_name,
                             'dwell_time': dwell,
                             'needs_reasoning': True

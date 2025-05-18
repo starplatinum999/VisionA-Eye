@@ -7,27 +7,34 @@ matplotlib.use('QtAgg')  # Use QtAgg backend instead of Qt5Agg
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+import matplotlib.dates as mdates
+from matplotlib.colors import LinearSegmentedColormap
+import seaborn as sns
 from collections import Counter, defaultdict
+import random
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QComboBox, QPushButton, QFrame, QGridLayout,
     QTabWidget, QScrollArea, QSplitter, QTableWidget,
-    QTableWidgetItem, QHeaderView, QStackedWidget
+    QTableWidgetItem, QHeaderView, QStackedWidget,
+    QRadioButton, QButtonGroup, QCheckBox, QDateEdit,
+    QTimeEdit, QDialog, QSlider, QToolTip, QGraphicsDropShadowEffect
 )
-from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QFont, QColor, QPalette
+from PySide6.QtCore import Qt, QSize, Signal, QTimer, QDateTime, QDate, QTime
+from PySide6.QtGui import QFont, QColor, QPalette, QPixmap, QIcon, QCursor, QBrush, QLinearGradient, QPainter, QPainterPath
 
 class MplCanvas(FigureCanvas):
     """Matplotlib canvas for embedding charts in the Qt application."""
-    def __init__(self, width=5, height=4, dpi=100):
+    def __init__(self, width=8, height=5, dpi=100):
         # Create figure with light background
         self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor='#F5F7FA')
         self.axes = self.fig.add_subplot(111)
         self.axes.set_facecolor('#FFFFFF')
         
         # Set text colors to dark
-        self.axes.tick_params(colors='#1F2937')
+        self.axes.tick_params(colors='#1F2937', labelsize=9)
         self.axes.xaxis.label.set_color('#1F2937')
         self.axes.yaxis.label.set_color('#1F2937')
         self.axes.title.set_color('#1F2937')
@@ -38,11 +45,17 @@ class MplCanvas(FigureCanvas):
         
         super(MplCanvas, self).__init__(self.fig)
         self.setStyleSheet("background-color: #F5F7FA;")
+        
+        # Set minimum size for better visibility
+        self.setMinimumHeight(400)
 
 class EventBarChart(MplCanvas):
     """Bar chart showing event counts by type."""
     def __init__(self, *args, **kwargs):
         super(EventBarChart, self).__init__(*args, **kwargs)
+        # Set larger figure size
+        self.fig.set_size_inches(9, 6)
+        self.setMinimumHeight(450)
     
     def update_chart(self, events, title="Events by Type"):
         """Update the chart with the provided events data."""
@@ -60,12 +73,34 @@ class EventBarChart(MplCanvas):
         # Sort by count (descending)
         sorted_events = dict(sorted(event_counts.items(), key=lambda x: x[1], reverse=True))
         
-        # Create bars with custom colors
-        colors = ['#3B82F6', '#93C5FD', '#22C55E', '#FACC15', '#EF4444', '#D1D5DB']
+        # Create gradient colors
+        color_map = {
+            'ROI Transition': '#0EA5E9',  # Sky blue
+            'ROI Exit': '#3B82F6',        # Blue
+            'Person at Shelf': '#8B5CF6',  # Purple
+            'Item Pickup': '#10B981',     # Green
+            'Potential Theft': '#EF4444',  # Red
+            'Long Dwell Time': '#F59E0B'  # Amber
+        }
+        
+        # Assign colors to event types, using fallbacks when needed
+        colors = []
+        for event_type in sorted_events.keys():
+            if event_type in color_map:
+                colors.append(color_map[event_type])
+            else:
+                # Generate a random color if not in our map
+                colors.append(f"#{random.randint(0, 0xFFFFFF):06x}")
+        
+        # Create bars with gradient effect
         bars = self.axes.bar(
             sorted_events.keys(), 
             sorted_events.values(),
-            color=colors[:len(sorted_events)]
+            color=colors,
+            width=0.6,
+            edgecolor='white',
+            linewidth=1,
+            alpha=0.8
         )
         
         # Add value labels on top of bars
@@ -77,16 +112,25 @@ class EventBarChart(MplCanvas):
                 f'{int(height)}',
                 ha='center', 
                 va='bottom',
-                color='#1F2937'
+                color='#1F2937',
+                fontsize=9,
+                fontweight='bold'
             )
         
         # Add labels and title
-        self.axes.set_title(title, fontsize=12, color='#1F2937')
-        self.axes.set_xlabel("Event Type", color='#1F2937')
-        self.axes.set_ylabel("Count", color='#1F2937')
+        self.axes.set_title(title, fontsize=12, fontweight='bold', color='#1F2937')
+        self.axes.set_xlabel("Event Type", color='#1F2937', fontsize=10)
+        self.axes.set_ylabel("Count", color='#1F2937', fontsize=10)
         
         # Rotate x labels for better readability
-        plt.setp(self.axes.get_xticklabels(), rotation=30, ha='right')
+        plt.setp(self.axes.get_xticklabels(), rotation=30, ha='right', fontsize=9)
+        
+        # Add grid lines for better readability
+        self.axes.grid(axis='y', linestyle='--', alpha=0.3)
+        
+        # Remove top and right spines
+        self.axes.spines['top'].set_visible(False)
+        self.axes.spines['right'].set_visible(False)
         
         # Adjust layout
         self.fig.tight_layout()
@@ -96,6 +140,10 @@ class TimelineChart(MplCanvas):
     """Timeline chart showing events over time."""
     def __init__(self, *args, **kwargs):
         super(TimelineChart, self).__init__(*args, **kwargs)
+        # Set a larger figure size for better visibility
+        self.fig.set_size_inches(9, 6)
+        # Ensure minimum height
+        self.setMinimumHeight(450)
     
     def update_chart(self, events, title="Event Timeline"):
         """Update the timeline chart with event data."""
@@ -115,17 +163,19 @@ class TimelineChart(MplCanvas):
         
         # Prepare data
         timestamps = list(events_by_time.keys())
-        counts = [len(events) for events in events_by_time.values()]
+        
+        # Sort timestamps
+        timestamps.sort()
         
         # Setup plot
-        # Define colors for different event types
+        # Define colors for different event types with improved palette
         event_colors = {
-            'ROI Transition': '#E4E7EB',
-            'ROI Exit': '#D1D5DB',
-            'Person at Shelf': '#3B82F6',
-            'Item Pickup': '#93C5FD',
-            'Potential Theft': '#EF4444',
-            'Long Dwell Time': '#FACC15',
+            'ROI Transition': '#0EA5E9',  # Sky blue
+            'ROI Exit': '#3B82F6',        # Blue
+            'Person at Shelf': '#8B5CF6',  # Purple
+            'Item Pickup': '#10B981',     # Green
+            'Potential Theft': '#EF4444',  # Red
+            'Long Dwell Time': '#F59E0B'  # Amber
         }
         
         # Count events by type for each timestamp
@@ -146,20 +196,38 @@ class TimelineChart(MplCanvas):
                 values, 
                 bottom=bottom,
                 label=event_type,
-                color=event_colors.get(event_type, '#555555')
+                color=event_colors.get(event_type, '#555555'),
+                alpha=0.8,
+                edgecolor='white',
+                linewidth=0.5,
+                width=0.7
             )
             bottom += np.array(values)
         
         # Add labels and title
-        self.axes.set_title(title, fontsize=12, color='#1F2937')
-        self.axes.set_xlabel("Time", color='#1F2937')
-        self.axes.set_ylabel("Number of Events", color='#1F2937')
+        self.axes.set_title(title, fontsize=12, fontweight='bold', color='#1F2937')
+        self.axes.set_xlabel("Time", color='#1F2937', fontsize=10)
+        self.axes.set_ylabel("Number of Events", color='#1F2937', fontsize=10)
         
         # Rotate x labels
-        plt.setp(self.axes.get_xticklabels(), rotation=45, ha='right')
+        plt.setp(self.axes.get_xticklabels(), rotation=45, ha='right', fontsize=9)
         
-        # Add legend
-        self.axes.legend(loc='upper right', facecolor='#FFFFFF', edgecolor='#D1D5DB')
+        # Add grid lines
+        self.axes.grid(axis='y', linestyle='--', alpha=0.3)
+        
+        # Add legend with better styling
+        legend = self.axes.legend(
+            loc='upper right', 
+            facecolor='#FFFFFF', 
+            edgecolor='#D1D5DB',
+            fontsize=8,
+            framealpha=0.9,
+            fancybox=True
+        )
+        
+        # Remove top and right spines
+        self.axes.spines['top'].set_visible(False)
+        self.axes.spines['right'].set_visible(False)
         
         # Adjust layout
         self.fig.tight_layout()
@@ -169,6 +237,9 @@ class RoiActivityChart(MplCanvas):
     """Chart showing activity in each ROI."""
     def __init__(self, *args, **kwargs):
         super(RoiActivityChart, self).__init__(*args, **kwargs)
+        # Set larger figure size
+        self.fig.set_size_inches(9, 6)
+        self.setMinimumHeight(450)
     
     def update_chart(self, events, title="ROI Activity"):
         """Update the ROI activity chart with event data."""
@@ -199,44 +270,60 @@ class RoiActivityChart(MplCanvas):
         # Sort ROIs by count (descending)
         sorted_rois = dict(sorted(roi_counts.items(), key=lambda x: x[1], reverse=True))
         
-        # Define colormap
-        cmap = plt.cm.get_cmap('tab10')
-        colors = [cmap(i % 10) for i in range(len(sorted_rois))]
-        
-        # Create horizontal bar chart
-        bars = self.axes.barh(
-            list(sorted_rois.keys()),
-            list(sorted_rois.values()),
-            color=colors
+        # Create pie chart with improved styling
+        wedges, texts, autotexts = self.axes.pie(
+            sorted_rois.values(), 
+            labels=sorted_rois.keys(),
+            autopct='%1.1f%%',
+            startangle=90,
+            shadow=False,
+            wedgeprops={'edgecolor': 'white', 'linewidth': 1.5, 'antialiased': True},
+            textprops={'fontsize': 9, 'color': '#1F2937'},
+            colors=plt.cm.tab10.colors[:len(sorted_rois)]
         )
         
-        # Add value labels
-        for bar in bars:
-            width = bar.get_width()
-            self.axes.text(
-                width + 0.1,
-                bar.get_y() + bar.get_height()/2.,
-                f'{int(width)}',
-                va='center',
-                color='#1F2937'
-            )
+        # Style the percentage text
+        for autotext in autotexts:
+            autotext.set_color('white')
+            autotext.set_fontweight('bold')
+            autotext.set_fontsize(9)
         
-        # Add labels and title
-        self.axes.set_title(title, fontsize=12, color='#1F2937')
-        self.axes.set_xlabel("Number of Events", color='#1F2937')
-        self.axes.set_ylabel("ROI Name", color='#1F2937')
+        # Equal aspect ratio ensures the pie chart is circular
+        self.axes.set_aspect('equal')
+        
+        # Add title
+        self.axes.set_title(title, fontsize=12, fontweight='bold', color='#1F2937')
+        
+        # Add legend with counts
+        legend_labels = [f"{roi} ({count})" for roi, count in sorted_rois.items()]
+        self.axes.legend(
+            wedges, 
+            legend_labels, 
+            title="ROIs", 
+            loc="center left", 
+            bbox_to_anchor=(1, 0.5),
+            fontsize=8,
+            title_fontsize=9,
+            frameon=True,
+            fancybox=True,
+            facecolor='#FFFFFF',
+            edgecolor='#D1D5DB'
+        )
         
         # Adjust layout
         self.fig.tight_layout()
         self.draw()
 
 class EventTypeByRoiChart(MplCanvas):
-    """Chart showing the distribution of event types across ROIs."""
+    """Chart showing distribution of event types by ROI."""
     def __init__(self, *args, **kwargs):
         super(EventTypeByRoiChart, self).__init__(*args, **kwargs)
+        # Set larger figure size
+        self.fig.set_size_inches(9, 6)
+        self.setMinimumHeight(450)
     
     def update_chart(self, events, title="Event Types by ROI"):
-        """Update the chart with event data."""
+        """Update the chart showing event types by ROI."""
         self.axes.clear()
         
         if not events:
@@ -244,73 +331,495 @@ class EventTypeByRoiChart(MplCanvas):
             self.draw()
             return
         
-        # Build data structure for events by ROI and type
-        roi_event_types = defaultdict(lambda: defaultdict(int))
+        # Build data structure to count event types by ROI
+        roi_event_counts = defaultdict(lambda: defaultdict(int))
         
         for event in events:
             event_type = event['type']
-            
-            # Determine which ROI this event is associated with
             roi_name = None
+            
+            # Extract ROI information from event
             if 'to_roi' in event and event['to_roi']:
                 roi_name = event['to_roi']
             elif 'roi_name' in event and event['roi_name']:
                 roi_name = event['roi_name']
             
             if roi_name:
-                roi_event_types[roi_name][event_type] += 1
+                roi_event_counts[roi_name][event_type] += 1
         
-        # Handle empty data
-        if not roi_event_types:
-            self.axes.set_title("No ROI-Event Data Found")
-            self.draw()
-            return
-        
-        # Prepare data for stacked bar chart
-        rois = list(roi_event_types.keys())
+        # Get unique ROIs and event types
+        rois = list(roi_event_counts.keys())
         event_types = set()
-        for roi_data in roi_event_types.values():
-            event_types.update(roi_data.keys())
+        for roi_events in roi_event_counts.values():
+            event_types.update(roi_events.keys())
         event_types = list(event_types)
         
-        # Colors for event types
-        event_colors = {
-            'ROI Transition': '#3a506b',
-            'ROI Exit': '#343a40',
-            'Person at Shelf': '#2e6f95',
-            'Item Pickup': '#6b705c',
-            'Potential Theft': '#9e2a2b',
-            'Long Dwell Time': '#774936',
-        }
-        
-        # Create a matrix for the data
+        # Create data matrix
         data = np.zeros((len(rois), len(event_types)))
         for i, roi in enumerate(rois):
             for j, event_type in enumerate(event_types):
-                data[i, j] = roi_event_types[roi][event_type]
+                data[i, j] = roi_event_counts[roi].get(event_type, 0)
         
-        # Create stacked bar chart
+        # Define visually appealing colors for different event types
+        event_colors = {
+            'ROI Transition': '#0EA5E9',  # Sky blue
+            'ROI Exit': '#3B82F6',        # Blue
+            'Person at Shelf': '#8B5CF6',  # Purple
+            'Item Pickup': '#10B981',     # Green
+            'Potential Theft': '#EF4444',  # Red
+            'Long Dwell Time': '#F59E0B'  # Amber
+        }
+        
+        # Create colors list for each event type, using fallbacks if needed
+        colors = []
+        for event_type in event_types:
+            if event_type in event_colors:
+                colors.append(event_colors[event_type])
+            else:
+                # Generate a color if not in our map
+                colors.append(f"#{random.randint(0, 0xFFFFFF):06x}")
+        
+        # Create stacked bar chart with a bit of spacing between bars
         bottom = np.zeros(len(rois))
         for j, event_type in enumerate(event_types):
             self.axes.bar(
-                rois,
-                data[:, j],
+                rois, 
+                data[:, j], 
                 bottom=bottom,
                 label=event_type,
-                color=event_colors.get(event_type, '#555555')
+                color=colors[j],
+                alpha=0.8,
+                edgecolor='white',
+                linewidth=0.5,
+                width=0.75
             )
             bottom += data[:, j]
         
         # Add labels and title
-        self.axes.set_title(title, fontsize=12, color='#1F2937')
-        self.axes.set_xlabel("ROI Name", color='#1F2937')
-        self.axes.set_ylabel("Number of Events", color='#1F2937')
+        self.axes.set_title(title, fontsize=12, fontweight='bold', color='#1F2937')
+        self.axes.set_xlabel("ROI Name", color='#1F2937', fontsize=10)
+        self.axes.set_ylabel("Number of Events", color='#1F2937', fontsize=10)
         
         # Rotate x labels for better readability
-        plt.setp(self.axes.get_xticklabels(), rotation=30, ha='right')
+        plt.setp(self.axes.get_xticklabels(), rotation=30, ha='right', fontsize=9)
         
-        # Add legend
-        self.axes.legend(loc='upper right', facecolor='#FFFFFF', edgecolor='#D1D5DB')
+        # Add grid lines for better readability
+        self.axes.grid(axis='y', linestyle='--', alpha=0.3)
+        
+        # Add legend with better styling
+        self.axes.legend(
+            loc='upper right',
+            fontsize=8,
+            frameon=True,
+            fancybox=True,
+            facecolor='#FFFFFF',
+            edgecolor='#D1D5DB',
+            ncol=2
+        )
+        
+        # Remove top and right spines
+        self.axes.spines['top'].set_visible(False)
+        self.axes.spines['right'].set_visible(False)
+        
+        # Adjust layout
+        self.fig.tight_layout()
+        self.draw()
+
+class HeatmapChart(MplCanvas):
+    """Heatmap showing ROI activity over time periods."""
+    def __init__(self, *args, **kwargs):
+        super(HeatmapChart, self).__init__(*args, **kwargs)
+        # Set larger figure size
+        self.fig.set_size_inches(9, 6)
+        self.setMinimumHeight(450)
+    
+    def update_chart(self, events, title="ROI Activity Heatmap"):
+        """Create a heatmap showing ROI activity over time."""
+        self.axes.clear()
+        
+        if not events:
+            self.axes.set_title("No Events to Display")
+            self.draw()
+            return
+        
+        # Extract times from events and convert to hour
+        time_roi_counts = defaultdict(lambda: defaultdict(int))
+        
+        for event in events:
+            timestamp = event.get('timestamp', '')
+            if not timestamp:
+                continue
+                
+            # Extract hour from timestamp (format: HH:MM:SS)
+            try:
+                hour = int(timestamp.split(':')[0])
+                # Group hours into 2-hour blocks for better visualization
+                hour_block = f"{hour//2 * 2:02d}-{(hour//2 * 2) + 2:02d}"
+                
+                # Get ROI name
+                roi_name = None
+                if 'to_roi' in event and event['to_roi']:
+                    roi_name = event['to_roi']
+                elif 'roi_name' in event and event['roi_name']:
+                    roi_name = event['roi_name']
+                
+                if roi_name:
+                    time_roi_counts[hour_block][roi_name] += 1
+            except (ValueError, IndexError):
+                continue
+        
+        # Handle empty data
+        if not time_roi_counts:
+            self.axes.set_title("No Time-based ROI Activity Found")
+            self.draw()
+            return
+        
+        # Create the heatmap data
+        time_blocks = sorted(time_roi_counts.keys())
+        unique_rois = set()
+        for roi_counts in time_roi_counts.values():
+            unique_rois.update(roi_counts.keys())
+        rois = sorted(unique_rois)
+        
+        # Create matrix for heatmap
+        data = np.zeros((len(rois), len(time_blocks)))
+        for i, roi in enumerate(rois):
+            for j, time_block in enumerate(time_blocks):
+                data[i, j] = time_roi_counts[time_block].get(roi, 0)
+        
+        # Create heatmap with custom colormap
+        cmap = LinearSegmentedColormap.from_list('BlueGreen', ['#EBF5FF', '#3B82F6', '#10B981'])
+        heatmap = self.axes.imshow(data, cmap=cmap, aspect='auto', interpolation='nearest')
+        
+        # Add colorbar
+        cbar = self.fig.colorbar(heatmap, ax=self.axes, shrink=0.8, pad=0.01)
+        cbar.ax.tick_params(labelsize=8)
+        
+        # Set labels and ticks
+        self.axes.set_yticks(np.arange(len(rois)))
+        self.axes.set_yticklabels(rois, fontsize=9)
+        
+        self.axes.set_xticks(np.arange(len(time_blocks)))
+        self.axes.set_xticklabels(time_blocks, rotation=45, ha='right', fontsize=9)
+        
+        # Add grid
+        self.axes.grid(False)
+        
+        # Add title
+        self.axes.set_title(title, fontsize=12, fontweight='bold', color='#1F2937')
+        self.axes.set_xlabel("Time Period (Hours)", fontsize=10, color='#1F2937')
+        self.axes.set_ylabel("ROI Name", fontsize=10, color='#1F2937')
+        
+        # Add annotations
+        for i in range(len(rois)):
+            for j in range(len(time_blocks)):
+                value = int(data[i, j])
+                if value > 0:
+                    text_color = 'white' if value > np.max(data) / 2 else 'black'
+                    self.axes.text(j, i, str(value), ha="center", va="center", 
+                                 color=text_color, fontsize=8, fontweight='bold')
+        
+        # Adjust layout
+        self.fig.tight_layout()
+        self.draw()
+
+class DwellTimeChart(MplCanvas):
+    """Chart showing dwell time distribution across ROIs."""
+    def __init__(self, *args, **kwargs):
+        super(DwellTimeChart, self).__init__(*args, **kwargs)
+        # Set larger figure size
+        self.fig.set_size_inches(9, 6)
+        self.setMinimumHeight(450)
+    
+    def update_chart(self, events, title="Dwell Time by ROI"):
+        """Update chart showing average dwell time by ROI."""
+        self.axes.clear()
+        
+        if not events:
+            self.axes.set_title("No Events to Display")
+            self.draw()
+            return
+        
+        # Calculate dwell time for each ROI
+        roi_dwell_times = defaultdict(list)
+        
+        # Group events by track_id
+        events_by_track = defaultdict(list)
+        for event in events:
+            track_id = event.get('track_id')
+            if track_id is not None:
+                events_by_track[track_id].append(event)
+        
+        # Calculate dwell time for each ROI visit
+        for track_id, track_events in events_by_track.items():
+            # Sort events by frame_idx
+            track_events.sort(key=lambda e: e.get('frame_idx', 0))
+            
+            # Track ROI visits
+            current_roi = None
+            enter_frame = None
+            
+            for event in track_events:
+                if event['type'] == 'ROI Transition' and 'to_roi' in event:
+                    if current_roi is not None and enter_frame is not None:
+                        # Calculate dwell time for previous ROI
+                        exit_frame = event.get('frame_idx', 0)
+                        if exit_frame > enter_frame:
+                            dwell_frames = exit_frame - enter_frame
+                            roi_dwell_times[current_roi].append(dwell_frames)
+                    
+                    # Start new ROI visit
+                    current_roi = event['to_roi']
+                    enter_frame = event.get('frame_idx', 0)
+                
+                elif event['type'] == 'ROI Exit' and 'roi_name' in event:
+                    if current_roi == event['roi_name'] and enter_frame is not None:
+                        # Calculate dwell time
+                        exit_frame = event.get('frame_idx', 0)
+                        if exit_frame > enter_frame:
+                            dwell_frames = exit_frame - enter_frame
+                            roi_dwell_times[current_roi].append(dwell_frames)
+                        
+                        # Reset tracking
+                        current_roi = None
+                        enter_frame = None
+        
+        # Calculate average dwell time for each ROI
+        avg_dwell_times = {}
+        for roi, dwell_times in roi_dwell_times.items():
+            if dwell_times:
+                avg_dwell_times[roi] = sum(dwell_times) / len(dwell_times)
+        
+        # If no dwell times calculated
+        if not avg_dwell_times:
+            self.axes.set_title("No Dwell Time Data Available")
+            self.draw()
+            return
+        
+        # Sort by average dwell time
+        sorted_roi_dwell = dict(sorted(avg_dwell_times.items(), key=lambda x: x[1], reverse=True))
+        
+        # Improved horizontal bar chart
+        bars = self.axes.barh(
+            list(sorted_roi_dwell.keys()),
+            list(sorted_roi_dwell.values()),
+            color=sns.color_palette("viridis", len(sorted_roi_dwell)),
+            alpha=0.8,
+            edgecolor='white',
+            linewidth=1,
+            height=0.7
+        )
+        
+        # Add value labels
+        for bar in bars:
+            width = bar.get_width()
+            self.axes.text(
+                width + max(sorted_roi_dwell.values()) * 0.02,
+                bar.get_y() + bar.get_height()/2,
+                f"{width:.1f}",
+                va='center',
+                fontsize=9,
+                color='#1F2937'
+            )
+        
+        # Add labels and title
+        self.axes.set_title(title, fontsize=12, fontweight='bold', color='#1F2937')
+        self.axes.set_xlabel("Average Frames", fontsize=10, color='#1F2937')
+        self.axes.set_ylabel("ROI", fontsize=10, color='#1F2937')
+        
+        # Customize y-axis labels
+        self.axes.tick_params(axis='y', labelsize=9)
+        
+        # Add grid lines for better readability
+        self.axes.grid(axis='x', linestyle='--', alpha=0.3)
+        
+        # Remove top and right spines
+        self.axes.spines['top'].set_visible(False)
+        self.axes.spines['right'].set_visible(False)
+        
+        # Adjust layout
+        self.fig.tight_layout()
+        self.draw()
+
+class FootfallAnalysisChart(MplCanvas):
+    """Chart showing footfall (number of people) over time periods."""
+    def __init__(self, *args, **kwargs):
+        super(FootfallAnalysisChart, self).__init__(*args, **kwargs)
+        # Set a larger figure size to increase height
+        self.fig.set_size_inches(10, 6)
+        
+        # Add a secondary axis for annotations
+        self.ax2 = self.axes.twinx()
+        self.ax2.set_visible(False)  # Initially hidden, only used for peak markers
+    
+    def update_chart(self, events, time_range="Hourly", title="Footfall Analysis"):
+        """
+        Update chart showing people count over time.
+        
+        Args:
+            events: List of event dictionaries
+            time_range: Hourly, Daily, Weekly, or Monthly aggregation
+            title: Chart title
+        """
+        self.axes.clear()
+        self.ax2.clear()
+        
+        if not events:
+            self.axes.set_title("No Events to Display")
+            self.draw()
+            return
+        
+        # Filter to only include person-related events
+        person_events = []
+        for event in events:
+            if (event.get('type') == 'Person at Shelf' or 
+                'person' in event.get('description', '').lower() or
+                (event.get('type') == 'ROI Transition' and event.get('class_id') == 0)):
+                person_events.append(event)
+        
+        if not person_events:
+            self.axes.set_title("No Person Data Available")
+            self.draw()
+            return
+        
+        # Group events by time according to selected range
+        footfall_by_time = defaultdict(int)
+        
+        for event in person_events:
+            timestamp = event.get('timestamp', '')
+            if not timestamp:
+                continue
+                
+            # Extract time components for grouping
+            try:
+                # Basic timestamp format: "HH:MM:SS"
+                hour, minute, second = map(int, timestamp.split(':'))
+                
+                # For testing - in real implementation these should be generated from actual timestamps
+                # Would use frame_idx and fps to calculate relative times, or use real datetime objects
+                # This is simplified for visualization purposes
+                
+                if time_range == "Hourly":
+                    # Group by hour
+                    time_key = f"{hour:02d}:00"
+                elif time_range == "Daily":
+                    # In real implementation, would use actual date
+                    # For demo, create artificial days from hours
+                    day = hour % 24  # Simulate different days
+                    time_key = f"Day {day+1}"
+                elif time_range == "Weekly":
+                    # Simulate weeks from hours
+                    week = (hour % 24) // 7
+                    time_key = f"Week {week+1}"
+                elif time_range == "Monthly":
+                    # Simulate months from hours
+                    month = (hour % 24) // 8
+                    time_key = f"Month {month+1}"
+                else:
+                    # Default hourly
+                    time_key = f"{hour:02d}:00"
+                
+                footfall_by_time[time_key] += 1
+            
+            except (ValueError, IndexError):
+                continue
+        
+        # Sort time keys appropriately
+        time_keys = sorted(footfall_by_time.keys())
+        footfall_counts = [footfall_by_time[k] for k in time_keys]
+        
+        # Create a more visually appealing bar chart
+        bars = self.axes.bar(
+            time_keys,
+            footfall_counts,
+            width=0.7,
+            color='#3B82F6',  # Blue
+            alpha=0.8,
+            edgecolor='white',
+            linewidth=1
+        )
+        
+        # Find peak times (local maxima)
+        peak_indices = []
+        for i in range(1, len(footfall_counts)-1):
+            if footfall_counts[i] > footfall_counts[i-1] and footfall_counts[i] > footfall_counts[i+1]:
+                peak_indices.append(i)
+        
+        # Additionally, check first and last elements
+        if len(footfall_counts) > 1:
+            if footfall_counts[0] > footfall_counts[1]:
+                peak_indices.append(0)
+            if footfall_counts[-1] > footfall_counts[-2]:
+                peak_indices.append(len(footfall_counts)-1)
+        
+        # Highlight peak times 
+        for idx in peak_indices:
+            bar = bars[idx]
+            bar.set_color('#10B981')  # Green for peak times
+            bar.set_edgecolor('white')
+            bar.set_linewidth(1.5)
+            
+            # Add a "PEAK" annotation above the bar
+            height = bar.get_height()
+            self.axes.annotate('PEAK',
+                xy=(bar.get_x() + bar.get_width()/2, height),
+                xytext=(0, 12),  # 12 points vertical offset
+                textcoords="offset points",
+                ha='center', va='bottom',
+                fontsize=10,
+                color='#10B981',
+                fontweight='bold',
+                bbox=dict(boxstyle="round,pad=0.3", fc='white', ec='#10B981', alpha=0.8))
+        
+        # Add value labels on top of bars
+        for bar in bars:
+            height = bar.get_height()
+            if height > 0:  # Only add labels to bars with values
+                self.axes.text(
+                    bar.get_x() + bar.get_width()/2.,
+                    height + max(footfall_counts) * 0.02,
+                    f'{int(height)}',
+                    ha='center', 
+                    va='bottom',
+                    color='#1F2937',
+                    fontsize=10,
+                    fontweight='bold'
+                )
+        
+        # Add labels and title
+        self.axes.set_title(f"{title} ({time_range})", fontsize=14, fontweight='bold', color='#1F2937')
+        self.axes.set_xlabel("Time Period", color='#1F2937', fontsize=12)
+        self.axes.set_ylabel("Number of People", color='#1F2937', fontsize=12)
+        
+        # Rotate x labels if there are more than 6 time periods
+        if len(time_keys) > 6:
+            plt.setp(self.axes.get_xticklabels(), rotation=45, ha='right', fontsize=10)
+        else:
+            plt.setp(self.axes.get_xticklabels(), fontsize=10)
+        
+        plt.setp(self.axes.get_yticklabels(), fontsize=10)
+        
+        # Add grid lines for better readability
+        self.axes.grid(axis='y', linestyle='--', alpha=0.3)
+        
+        # Remove top and right spines
+        self.axes.spines['top'].set_visible(False)
+        self.axes.spines['right'].set_visible(False)
+        
+        # Add summary statistics
+        if footfall_counts:
+            avg_footfall = sum(footfall_counts) / len(footfall_counts)
+            max_footfall = max(footfall_counts)
+            max_time = time_keys[footfall_counts.index(max_footfall)]
+            
+            stats_text = f"Peak Time: {max_time} ({max_footfall} people)\nAverage: {avg_footfall:.1f} people per period"
+            self.axes.text(
+                0.02, 0.97, stats_text,
+                transform=self.axes.transAxes,
+                fontsize=10,
+                verticalalignment='top',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.8, edgecolor='#E5E7EB')
+            )
         
         # Adjust layout
         self.fig.tight_layout()
@@ -438,7 +947,8 @@ class AnalyticsDashboard(QWidget):
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.setStyleSheet("""
             QPushButton {
-                background-color: #3B82F6;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                          stop:0 #4F86F7, stop:1 #3B72D9);
                 color: white;
                 border: none;
                 border-radius: 6px;
@@ -448,14 +958,38 @@ class AnalyticsDashboard(QWidget):
                 min-width: 90px;
             }
             QPushButton:hover {
-                background-color: #2563EB;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                          stop:0 #5D93FF, stop:1 #4B82E9);
             }
             QPushButton:pressed {
-                background-color: #1D4ED8;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                          stop:0 #3A67BA, stop:1 #2B57A9);
             }
         """)
         self.refresh_button.clicked.connect(self.update_dashboard)
         filter_layout.addWidget(self.refresh_button)
+        
+        # Export button
+        self.export_button = QPushButton("Export Data")
+        self.export_button.setStyleSheet("""
+            QPushButton {
+                background-color: #10B981;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: 600;
+                font-size: 14px;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+            QPushButton:pressed {
+                background-color: #047857;
+            }
+        """)
+        filter_layout.addWidget(self.export_button)
         
         header_layout.addLayout(filter_layout)
         self.layout.addLayout(header_layout)
@@ -469,18 +1003,25 @@ class AnalyticsDashboard(QWidget):
         
         # Create stat cards
         self.stat_cards = [
-            {"id": "total_events", "title": "Total Events", "value": "0", "icon": "📊", "subtitle": "No events detected in the selected time range"},
-            {"id": "unique_tracks", "title": "Unique Objects", "value": "0", "icon": "🔍", "subtitle": "No objects detected in the selected time range"},
-            {"id": "person_count", "title": "Person Count", "value": "0", "icon": "👤", "subtitle": "No people detected in the selected time range"},
-            {"id": "potential_issues", "title": "Potential Issues", "value": "0", "icon": "⚠️", "subtitle": "No issues detected in the selected time range"}
+            {"id": "total_events", "title": "Total Events", "value": "0", "icon": "📊", "subtitle": "Total events detected", "color": "#3B82F6"},
+            {"id": "unique_tracks", "title": "Unique Objects", "value": "0", "icon": "🔍", "subtitle": "Distinct objects tracked", "color": "#8B5CF6"},
+            {"id": "person_count", "title": "Person Count", "value": "0", "icon": "👤", "subtitle": "People detected in frame", "color": "#10B981"},
+            {"id": "potential_issues", "title": "Potential Issues", "value": "0", "icon": "⚠️", "subtitle": "Suspicious activities", "color": "#EF4444"}
         ]
         
         for card in self.stat_cards:
             card_widget = QFrame()
-            card_widget.setStyleSheet("""
+            # Create shadow effect
+            shadow = QGraphicsDropShadowEffect()
+            shadow.setBlurRadius(15)
+            shadow.setColor(QColor(0, 0, 0, 25))
+            shadow.setOffset(0, 2)
+            card_widget.setGraphicsEffect(shadow)
+            
+            card_widget.setStyleSheet(f"""
                 background-color: #FFFFFF;
-                border-radius: 8px;
-                border: 1px solid #E4E7EB;
+                border-radius: 12px;
+                border-left: 4px solid {card["color"]};
             """)
             
             card_layout = QVBoxLayout()
@@ -494,20 +1035,26 @@ class AnalyticsDashboard(QWidget):
             title_row.addWidget(title_label)
             title_row.addStretch()
             
+            icon_label = QLabel(card["icon"])
+            icon_label.setStyleSheet(f"font-size: 20px; color: {card['color']};")
+            title_row.addWidget(icon_label)
+            
             card_layout.addLayout(title_row)
             
             # Value
             value_label = QLabel(card["value"])
-            value_label.setFont(QFont("-apple-system", 28, QFont.Bold))
-            value_label.setStyleSheet("color: #111827; letter-spacing: -0.5px;")
-            card["value_label"] = value_label
+            value_label.setObjectName(f"{card['id']}_value")
+            value_label.setStyleSheet("""
+                font-size: 28px;
+                font-weight: 700;
+                color: #111827;
+                margin-top: 5px;
+            """)
             card_layout.addWidget(value_label)
             
             # Subtitle
             subtitle_label = QLabel(card["subtitle"])
             subtitle_label.setStyleSheet("color: #6B7280; font-size: 13px;")
-            subtitle_label.setWordWrap(True)
-            card["subtitle_label"] = subtitle_label
             card_layout.addWidget(subtitle_label)
             
             card_widget.setLayout(card_layout)
@@ -515,472 +1062,652 @@ class AnalyticsDashboard(QWidget):
         
         self.layout.addWidget(stats_section)
         
-        # Charts section
-        charts_section = QWidget()
-        charts_layout = QVBoxLayout(charts_section)
-        charts_layout.setContentsMargins(0, 0, 0, 0)
-        charts_layout.setSpacing(0)
-        
-        # Tab controls for charts
-        tab_bar = QWidget()
-        tab_bar.setStyleSheet("background-color: transparent; border-bottom: 1px solid #E5E7EB;")
-        tab_layout = QHBoxLayout(tab_bar)
-        tab_layout.setContentsMargins(0, 0, 0, 0)
-        tab_layout.setSpacing(0)
-        
-        self.tab_buttons = []
-        tab_styles = """
-            QPushButton {
-                background-color: transparent;
-                color: #6B7280;
-                border: none;
-                padding: 12px 20px;
-                font-weight: 500;
-                font-size: 15px;
-                text-align: left;
-                border-bottom: 2px solid transparent;
+        # Main dashboard content using tabs
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #E4E7EB;
+                background-color: #FFFFFF;
+                border-radius: 8px;
+                padding: 10px;
             }
-            QPushButton:checked {
+            QTabBar::tab {
+                background-color: #F5F7FA;
+                color: #4B5563;
+                border: 1px solid #E4E7EB;
+                border-bottom: none;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                padding: 8px 16px;
+                margin-right: 2px;
+                font-weight: 500;
+            }
+            QTabBar::tab:selected {
+                background-color: #FFFFFF;
                 color: #3B82F6;
                 border-bottom: 2px solid #3B82F6;
-                font-weight: 600;
             }
-            QPushButton:hover:!checked {
-                color: #4B5563;
-                background-color: #F9FAFB;
+            QTabBar::tab:hover:!selected {
+                background-color: #EFF6FF;
+                color: #2563EB;
             }
-        """
-        
-        # Events by Type tab
-        events_by_type_btn = QPushButton("Events by Type")
-        events_by_type_btn.setCheckable(True)
-        events_by_type_btn.setChecked(True)
-        events_by_type_btn.setStyleSheet(tab_styles)
-        events_by_type_btn.clicked.connect(lambda: self.switch_tab(0))
-        tab_layout.addWidget(events_by_type_btn)
-        self.tab_buttons.append(events_by_type_btn)
-        
-        # Event Timeline tab
-        timeline_btn = QPushButton("Event Timeline")
-        timeline_btn.setCheckable(True)
-        timeline_btn.setStyleSheet(tab_styles)
-        timeline_btn.clicked.connect(lambda: self.switch_tab(1))
-        tab_layout.addWidget(timeline_btn)
-        self.tab_buttons.append(timeline_btn)
-        
-        # ROI Activity tab
-        roi_activity_btn = QPushButton("ROI Activity")
-        roi_activity_btn.setCheckable(True)
-        roi_activity_btn.setStyleSheet(tab_styles)
-        roi_activity_btn.clicked.connect(lambda: self.switch_tab(2))
-        tab_layout.addWidget(roi_activity_btn)
-        self.tab_buttons.append(roi_activity_btn)
-        
-        # Events by ROI tab
-        events_by_roi_btn = QPushButton("Events by ROI")
-        events_by_roi_btn.setCheckable(True)
-        events_by_roi_btn.setStyleSheet(tab_styles)
-        events_by_roi_btn.clicked.connect(lambda: self.switch_tab(3))
-        tab_layout.addWidget(events_by_roi_btn)
-        self.tab_buttons.append(events_by_roi_btn)
-        
-        tab_layout.addStretch()
-        charts_layout.addWidget(tab_bar)
-        
-        # Chart stack
-        self.chart_stack = QStackedWidget()
-        self.chart_stack.setStyleSheet("""
-            background-color: #FFFFFF; 
-            border: 1px solid #E4E7EB; 
-            border-top: none; 
-            border-radius: 0 0 8px 8px;
         """)
         
-        # Chart panels
-        chart_panel_style = "padding: 20px; background-color: #FFFFFF;"
+        # Overview tab
+        overview_tab = QWidget()
+        overview_layout = QVBoxLayout(overview_tab)
+        overview_layout.setContentsMargins(10, 15, 10, 10)
+        overview_layout.setSpacing(20)
         
-        # Events by Type chart
-        events_type_panel = QWidget()
-        events_type_layout = QVBoxLayout(events_type_panel)
-        events_type_layout.setContentsMargins(20, 20, 20, 20)
-        self.event_type_chart = EventBarChart(width=6, height=4)
-        events_type_layout.addWidget(self.event_type_chart)
+        # Create grid layout for charts in overview tab
+        charts_grid = QGridLayout()
+        charts_grid.setSpacing(20)
         
-        # Add "No data available" message for empty state
-        self.event_type_empty = QLabel("No data available for the selected time range")
-        self.event_type_empty.setAlignment(Qt.AlignCenter)
-        self.event_type_empty.setStyleSheet("color: #6B7280; font-size: 15px; padding: 20px; background: transparent;")
-        self.event_type_empty.setVisible(False)
-        events_type_layout.addWidget(self.event_type_empty)
+        # Event type chart - top left
+        event_type_frame = QFrame()
+        event_type_frame.setStyleSheet("""
+            background-color: #FFFFFF;
+            border-radius: 8px;
+            border: 1px solid #E4E7EB;
+            padding: 10px;
+        """)
+        event_type_layout = QVBoxLayout(event_type_frame)
+        event_type_layout.setContentsMargins(10, 10, 10, 10)
         
-        self.chart_stack.addWidget(events_type_panel)
+        event_type_title = QLabel("Events by Type")
+        event_type_title.setStyleSheet("font-size: 16px; font-weight: 600; color: #111827;")
+        event_type_layout.addWidget(event_type_title)
         
-        # Timeline chart
-        timeline_panel = QWidget()
-        timeline_layout = QVBoxLayout(timeline_panel)
-        timeline_layout.setContentsMargins(20, 20, 20, 20)
-        self.timeline_chart = TimelineChart(width=6, height=4)
+        self.event_type_chart = EventBarChart()
+        event_type_layout.addWidget(self.event_type_chart)
+        
+        charts_grid.addWidget(event_type_frame, 0, 0)
+        
+        # ROI activity chart - top right
+        roi_activity_frame = QFrame()
+        roi_activity_frame.setStyleSheet("""
+            background-color: #FFFFFF;
+            border-radius: 8px;
+            border: 1px solid #E4E7EB;
+            padding: 10px;
+        """)
+        roi_activity_layout = QVBoxLayout(roi_activity_frame)
+        roi_activity_layout.setContentsMargins(10, 10, 10, 10)
+        
+        roi_activity_title = QLabel("ROI Activity Distribution")
+        roi_activity_title.setStyleSheet("font-size: 16px; font-weight: 600; color: #111827;")
+        roi_activity_layout.addWidget(roi_activity_title)
+        
+        self.roi_activity_chart = RoiActivityChart()
+        roi_activity_layout.addWidget(self.roi_activity_chart)
+        
+        charts_grid.addWidget(roi_activity_frame, 0, 1)
+        
+        # Timeline chart - bottom left
+        timeline_frame = QFrame()
+        timeline_frame.setStyleSheet("""
+            background-color: #FFFFFF;
+            border-radius: 8px;
+            border: 1px solid #E4E7EB;
+            padding: 10px;
+        """)
+        timeline_layout = QVBoxLayout(timeline_frame)
+        timeline_layout.setContentsMargins(10, 10, 10, 10)
+        
+        timeline_title = QLabel("Event Timeline")
+        timeline_title.setStyleSheet("font-size: 16px; font-weight: 600; color: #111827;")
+        timeline_layout.addWidget(timeline_title)
+        
+        self.timeline_chart = TimelineChart()
         timeline_layout.addWidget(self.timeline_chart)
         
-        # Add "No data available" message for empty state
-        self.timeline_empty = QLabel("No data available for the selected time range")
-        self.timeline_empty.setAlignment(Qt.AlignCenter)
-        self.timeline_empty.setStyleSheet("color: #6B7280; font-size: 15px; padding: 20px; background: transparent;")
-        self.timeline_empty.setVisible(False)
-        timeline_layout.addWidget(self.timeline_empty)
+        charts_grid.addWidget(timeline_frame, 1, 0)
         
-        self.chart_stack.addWidget(timeline_panel)
+        # Event type by ROI chart - bottom right
+        event_roi_frame = QFrame()
+        event_roi_frame.setStyleSheet("""
+            background-color: #FFFFFF;
+            border-radius: 8px;
+            border: 1px solid #E4E7EB;
+            padding: 10px;
+        """)
+        event_roi_layout = QVBoxLayout(event_roi_frame)
+        event_roi_layout.setContentsMargins(10, 10, 10, 10)
         
-        # ROI activity chart
-        roi_panel = QWidget()
-        roi_layout = QVBoxLayout(roi_panel)
-        roi_layout.setContentsMargins(20, 20, 20, 20)
-        self.roi_chart = RoiActivityChart(width=6, height=4)
-        roi_layout.addWidget(self.roi_chart)
+        event_roi_title = QLabel("Event Types by ROI")
+        event_roi_title.setStyleSheet("font-size: 16px; font-weight: 600; color: #111827;")
+        event_roi_layout.addWidget(event_roi_title)
         
-        # Add "No data available" message for empty state
-        self.roi_empty = QLabel("No data available for the selected time range")
-        self.roi_empty.setAlignment(Qt.AlignCenter)
-        self.roi_empty.setStyleSheet("color: #6B7280; font-size: 15px; padding: 20px; background: transparent;")
-        self.roi_empty.setVisible(False)
-        roi_layout.addWidget(self.roi_empty)
-        
-        self.chart_stack.addWidget(roi_panel)
-        
-        # Event types by ROI chart
-        event_roi_panel = QWidget()
-        event_roi_layout = QVBoxLayout(event_roi_panel)
-        event_roi_layout.setContentsMargins(20, 20, 20, 20)
-        self.event_roi_chart = EventTypeByRoiChart(width=6, height=4)
+        self.event_roi_chart = EventTypeByRoiChart()
         event_roi_layout.addWidget(self.event_roi_chart)
         
-        # Add "No data available" message for empty state
-        self.event_roi_empty = QLabel("No data available for the selected time range")
-        self.event_roi_empty.setAlignment(Qt.AlignCenter)
-        self.event_roi_empty.setStyleSheet("color: #6B7280; font-size: 15px; padding: 20px; background: transparent;")
-        self.event_roi_empty.setVisible(False)
-        event_roi_layout.addWidget(self.event_roi_empty)
+        charts_grid.addWidget(event_roi_frame, 1, 1)
         
-        self.chart_stack.addWidget(event_roi_panel)
+        overview_layout.addLayout(charts_grid)
         
-        charts_layout.addWidget(self.chart_stack)
-        self.layout.addWidget(charts_section)
+        # Add overview tab to tab widget
+        self.tab_widget.addTab(overview_tab, "Overview")
         
-        # Detailed event data section
-        data_section = QWidget()
-        data_layout = QVBoxLayout(data_section)
-        data_layout.setContentsMargins(0, 0, 0, 0)
-        data_layout.setSpacing(12)
+        # Advanced Analytics tab with additional charts
+        advanced_tab = QWidget()
+        advanced_layout = QVBoxLayout(advanced_tab)
+        advanced_layout.setContentsMargins(10, 15, 10, 10)
+        advanced_layout.setSpacing(20)
         
-        # Section header
-        data_header = QWidget()
-        data_header_layout = QHBoxLayout(data_header)
-        data_header_layout.setContentsMargins(0, 8, 0, 12)
+        # Create grid layout for charts in advanced tab
+        advanced_grid = QGridLayout()
+        advanced_grid.setSpacing(20)
         
-        data_title = QLabel("Detailed Event Data")
-        data_title.setFont(QFont("-apple-system", 18, QFont.DemiBold))
-        data_title.setStyleSheet("color: #111827; letter-spacing: -0.5px;")
-        data_header_layout.addWidget(data_title)
+        # ROI Heatmap - top left
+        heatmap_frame = QFrame()
+        heatmap_frame.setStyleSheet("""
+            background-color: #FFFFFF;
+            border-radius: 8px;
+            border: 1px solid #E4E7EB;
+            padding: 10px;
+        """)
+        heatmap_layout = QVBoxLayout(heatmap_frame)
+        heatmap_layout.setContentsMargins(10, 10, 10, 10)
         
-        data_subtitle = QLabel("Comprehensive list of all detected events")
-        data_subtitle.setStyleSheet("color: #6B7280; font-size: 14px; margin-left: 12px; padding-top: 4px;")
-        data_header_layout.addWidget(data_subtitle)
+        heatmap_title = QLabel("ROI Activity Heatmap")
+        heatmap_title.setStyleSheet("font-size: 16px; font-weight: 600; color: #111827;")
+        heatmap_layout.addWidget(heatmap_title)
         
-        data_header_layout.addStretch()
-        data_layout.addWidget(data_header)
+        self.heatmap_chart = HeatmapChart()
+        heatmap_layout.addWidget(self.heatmap_chart)
+        
+        advanced_grid.addWidget(heatmap_frame, 0, 0)
+        
+        # Dwell time chart - top right
+        dwell_frame = QFrame()
+        dwell_frame.setStyleSheet("""
+            background-color: #FFFFFF;
+            border-radius: 8px;
+            border: 1px solid #E4E7EB;
+            padding: 10px;
+        """)
+        dwell_layout = QVBoxLayout(dwell_frame)
+        dwell_layout.setContentsMargins(10, 10, 10, 10)
+        
+        dwell_title = QLabel("Dwell Time by ROI")
+        dwell_title.setStyleSheet("font-size: 16px; font-weight: 600; color: #111827;")
+        dwell_layout.addWidget(dwell_title)
+        
+        self.dwell_chart = DwellTimeChart()
+        dwell_layout.addWidget(self.dwell_chart)
+        
+        advanced_grid.addWidget(dwell_frame, 0, 1)
+        
+        # Add grid layout to advanced tab
+        advanced_layout.addLayout(advanced_grid)
+        
+        # Add advanced tab to tab widget
+        self.tab_widget.addTab(advanced_tab, "Advanced Analytics")
+        
+        # Footfall Analysis tab
+        footfall_tab = QWidget()
+        footfall_layout = QVBoxLayout(footfall_tab)
+        footfall_layout.setContentsMargins(15, 15, 15, 15)
+        footfall_layout.setSpacing(20)
+        
+        # Controls section for footfall analysis
+        controls_frame = QFrame()
+        controls_frame.setStyleSheet("""
+            background-color: #FFFFFF;
+            border-radius: 8px;
+            border: 1px solid #E4E7EB;
+            padding: 10px;
+        """)
+        controls_layout = QHBoxLayout(controls_frame)
+        controls_layout.setContentsMargins(15, 10, 15, 10)
+        
+        # Time range selector
+        time_range_label = QLabel("Time Aggregation:")
+        time_range_label.setStyleSheet("font-weight: 500; color: #4B5563; min-width: 120px;")
+        controls_layout.addWidget(time_range_label)
+        
+        self.time_range_combo = QComboBox()
+        self.time_range_combo.addItems(["Hourly", "Daily", "Weekly", "Monthly"])
+        self.time_range_combo.setCurrentIndex(0)
+        self.time_range_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #FFFFFF;
+                color: #1F2937;
+                border: 1px solid #D1D5DB;
+                border-radius: 6px;
+                padding: 6px 12px;
+                min-width: 120px;
+                font-size: 14px;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox:hover {
+                border-color: #9CA3AF;
+            }
+        """)
+        self.time_range_combo.currentIndexChanged.connect(self.update_footfall_chart)
+        controls_layout.addWidget(self.time_range_combo)
+        
+        # Date range selector for future implementation
+        controls_layout.addStretch(1)
+        
+        date_range_label = QLabel("Data Source:")
+        date_range_label.setStyleSheet("font-weight: 500; color: #4B5563; margin-left: 20px; min-width: 100px;")
+        controls_layout.addWidget(date_range_label)
+        
+        self.data_source_combo = QComboBox()
+        self.data_source_combo.addItems(["All Data", "Current Session", "Selected Timeframe"])
+        self.data_source_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #FFFFFF;
+                color: #1F2937;
+                border: 1px solid #D1D5DB;
+                border-radius: 6px;
+                padding: 6px 12px;
+                min-width: 150px;
+                font-size: 14px;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox:hover {
+                border-color: #9CA3AF;
+            }
+        """)
+        self.data_source_combo.currentIndexChanged.connect(self.update_footfall_chart)
+        controls_layout.addWidget(self.data_source_combo)
+        
+        # Apply button
+        self.apply_btn = QPushButton("Apply")
+        self.apply_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                          stop:0 #4F86F7, stop:1 #3B72D9);
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 20px;
+                font-weight: 600;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                          stop:0 #5D93FF, stop:1 #4B82E9);
+            }
+        """)
+        self.apply_btn.clicked.connect(self.update_footfall_chart)
+        controls_layout.addWidget(self.apply_btn)
+        
+        footfall_layout.addWidget(controls_frame)
+        
+        # Footfall chart with increased height
+        footfall_chart_frame = QFrame()
+        footfall_chart_frame.setStyleSheet("""
+            background-color: #FFFFFF;
+            border-radius: 8px;
+            border: 1px solid #E4E7EB;
+            padding: 15px;
+        """)
+        footfall_chart_layout = QVBoxLayout(footfall_chart_frame)
+        footfall_chart_layout.setContentsMargins(10, 15, 10, 10)
+        
+        # Title
+        footfall_title = QLabel("People Traffic Analysis")
+        footfall_title.setStyleSheet("font-size: 18px; font-weight: 600; color: #111827; margin-bottom: 10px;")
+        footfall_chart_layout.addWidget(footfall_title)
+        
+        # Description
+        footfall_desc = QLabel("Analyze when your location experiences the highest visitor traffic. Peaks are highlighted in green.")
+        footfall_desc.setStyleSheet("color: #6B7280; font-size: 14px; margin-bottom: 15px;")
+        footfall_desc.setWordWrap(True)
+        footfall_chart_layout.addWidget(footfall_desc)
+        
+        # The chart
+        self.footfall_chart = FootfallAnalysisChart()
+        footfall_chart_layout.addWidget(self.footfall_chart)
+        
+        footfall_layout.addWidget(footfall_chart_frame, 1)  # Give it a stretch factor of 1
+        
+        # Add insights section
+        insights_frame = QFrame()
+        insights_frame.setStyleSheet("""
+            background-color: #FFFFFF;
+            border-radius: 8px;
+            border: 1px solid #E4E7EB;
+            padding: 15px;
+        """)
+        insights_layout = QVBoxLayout(insights_frame)
+        
+        insights_title = QLabel("Traffic Insights")
+        insights_title.setStyleSheet("font-size: 16px; font-weight: 600; color: #111827;")
+        insights_layout.addWidget(insights_title)
+        
+        self.insights_content = QLabel(
+            "• Analyze when your foot traffic is highest to optimize staffing and operations\n"
+            "• Green bars indicate peak times with the highest visitor counts\n"
+            "• Compare different time periods to identify patterns and trends\n"
+            "• Use these insights for scheduling, marketing campaigns, and resource allocation"
+        )
+        self.insights_content.setStyleSheet("color: #4B5563; font-size: 14px; line-height: 1.6;")
+        self.insights_content.setWordWrap(True)
+        insights_layout.addWidget(self.insights_content)
+        
+        footfall_layout.addWidget(insights_frame)
+        
+        # Add tab to widget
+        self.tab_widget.addTab(footfall_tab, "Footfall Analysis")
+        
+        # Event Log tab
+        events_tab = QWidget()
+        events_layout = QVBoxLayout(events_tab)
+        events_layout.setContentsMargins(10, 15, 10, 10)
         
         # Event table
         self.event_table = QTableWidget()
+        self.event_table.setColumnCount(5)
+        self.event_table.setHorizontalHeaderLabels(["Time", "Event Type", "Description", "Location", "Needs Attention"])
+        self.event_table.horizontalHeader().setStyleSheet("""
+            QHeaderView::section {
+                background-color: #F9FAFB;
+                color: #111827;
+                padding: 8px;
+                border: 1px solid #E4E7EB;
+                font-weight: 600;
+            }
+        """)
         self.event_table.setStyleSheet("""
             QTableWidget {
                 background-color: #FFFFFF;
-                color: #1F2937;
-                gridline-color: #E5E7EB;
-                border: 1px solid #E4E7EB;
                 border-radius: 8px;
-                font-size: 14px;
-            }
-            QHeaderView::section {
-                background-color: #F8FAFC;
-                color: #4B5563;
-                font-weight: 600;
-                border: none;
-                border-bottom: 1px solid #E5E7EB;
-                padding: 12px;
-                font-size: 13px;
+                border: 1px solid #E4E7EB;
+                gridline-color: #F3F4F6;
+                outline: none;
             }
             QTableWidget::item {
-                border: none;
-                border-bottom: 1px solid #E5E7EB;
-                padding: 8px 4px;
+                padding: 8px;
+                border-bottom: 1px solid #F3F4F6;
             }
             QTableWidget::item:selected {
                 background-color: #EFF6FF;
-                color: #1E40AF;
+                color: #2563EB;
             }
         """)
-        self.event_table.setColumnCount(5)
-        self.event_table.setHorizontalHeaderLabels(["Type", "Time", "Description", "Frame", "ID"])
-        self.event_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.event_table.verticalHeader().setVisible(False)
-        self.event_table.setAlternatingRowColors(True)
-        self.event_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.event_table.setEditTriggers(QTableWidget.NoEditTriggers)
         
-        data_layout.addWidget(self.event_table)
+        # Set column widths
+        self.event_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.event_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.event_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         
-        # Pagination controls
-        pagination = QWidget()
-        pagination_layout = QHBoxLayout(pagination)
-        pagination_layout.setContentsMargins(0, 5, 0, 0)
+        events_layout.addWidget(self.event_table)
         
-        self.events_count_label = QLabel("Showing 0 of 0 events")
-        self.events_count_label.setStyleSheet("color: #6B7280; font-size: 14px;")
-        pagination_layout.addWidget(self.events_count_label)
+        self.tab_widget.addTab(events_tab, "Event Log")
         
-        pagination_layout.addStretch()
+        # Add tab widget to main layout
+        self.layout.addWidget(self.tab_widget, 1)  # stretch factor of 1
         
-        prev_btn = QPushButton("Previous")
-        prev_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #F9FAFB;
-                color: #4B5563;
-                border: 1px solid #D1D5DB;
-                border-radius: 6px;
-                padding: 6px 16px;
-                font-size: 14px;
-                font-weight: 500;
-            }
-            QPushButton:hover:!disabled {
-                background-color: #F3F4F6;
-                border-color: #9CA3AF;
-            }
-            QPushButton:pressed {
-                background-color: #E5E7EB;
-            }
-            QPushButton:disabled {
-                color: #9CA3AF;
-                border-color: #E5E7EB;
-                background-color: #F9FAFB;
-            }
-        """)
-        prev_btn.setEnabled(False)
-        pagination_layout.addWidget(prev_btn)
+        # Connect tab changed signal
+        self.tab_widget.currentChanged.connect(self.switch_tab)
         
-        next_btn = QPushButton("Next")
-        next_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #F9FAFB;
-                color: #4B5563;
-                border: 1px solid #D1D5DB;
-                border-radius: 6px;
-                padding: 6px 16px;
-                font-size: 14px;
-                font-weight: 500;
-                margin-left: 8px;
-            }
-            QPushButton:hover:!disabled {
-                background-color: #F3F4F6;
-                border-color: #9CA3AF;
-            }
-            QPushButton:pressed {
-                background-color: #E5E7EB;
-            }
-            QPushButton:disabled {
-                color: #9CA3AF;
-                border-color: #E5E7EB;
-                background-color: #F9FAFB;
-            }
-        """)
-        next_btn.setEnabled(False)
-        pagination_layout.addWidget(next_btn)
-        
-        data_layout.addWidget(pagination)
-        self.layout.addWidget(data_section)
+        # Update the dashboard initially
+        QTimer.singleShot(100, self.update_dashboard)
     
     def switch_tab(self, index):
         """Switch between chart tabs."""
-        self.chart_stack.setCurrentIndex(index)
-        for i, btn in enumerate(self.tab_buttons):
-            btn.setChecked(i == index)
+        self.tab_widget.setCurrentIndex(index)
     
     def set_events(self, events):
         """Set the events data and update the dashboard."""
         self.events = events
         
-        # Update event type filter options
+        # Update event filter options
+        self.update_event_filter_options()
+        
+        # Update the dashboard with the new data
+        self.update_dashboard()
+    
+    def update_event_filter_options(self):
+        """Update the event filter dropdown with available event types."""
+        # Store current selection
+        current_text = self.event_filter.currentText()
+        
+        # Clear and re-add "All Events"
         self.event_filter.clear()
         self.event_filter.addItem("All Events")
         
-        # Find unique event types
+        # Get unique event types
         event_types = set()
-        for event in events:
-            event_types.add(event['type'])
+        for event in self.events:
+            if 'type' in event:
+                event_types.add(event['type'])
         
         # Add event types to filter
         for event_type in sorted(event_types):
             self.event_filter.addItem(event_type)
         
-        # Update the dashboard with the new data
-        self.update_dashboard()
+        # Try to restore previous selection
+        index = self.event_filter.findText(current_text)
+        if index >= 0:
+            self.event_filter.setCurrentIndex(index)
     
     def update_dashboard(self):
-        """Update all charts and stats with filtered data."""
-        # Apply filters to get filtered events
+        """Update the entire dashboard with current data and filters."""
+        # Get filtered events based on current selections
         filtered_events = self.get_filtered_events()
         
         # Update statistics
         self.update_statistics(filtered_events)
         
-        # Update charts
+        # Update charts in Overview tab
         self.event_type_chart.update_chart(filtered_events)
         self.timeline_chart.update_chart(filtered_events)
-        self.roi_chart.update_chart(filtered_events)
+        self.roi_activity_chart.update_chart(filtered_events)
         self.event_roi_chart.update_chart(filtered_events)
         
-        # Update empty state visibility
-        has_events = len(filtered_events) > 0
-        self.event_type_empty.setVisible(not has_events)
-        self.timeline_empty.setVisible(not has_events)
-        self.roi_empty.setVisible(not has_events)
-        self.event_roi_empty.setVisible(not has_events)
+        # Update advanced charts
+        self.heatmap_chart.update_chart(filtered_events)
+        self.dwell_chart.update_chart(filtered_events)
         
-        # Update table
+        # Update event table
         self.update_event_table(filtered_events)
         
-        # Update pagination
-        self.events_count_label.setText(f"Showing {len(filtered_events)} of {len(filtered_events)} events")
+        # Update footfall chart
+        self.update_footfall_chart()
     
     def get_filtered_events(self):
-        """Apply selected filters to the events."""
-        if not self.events:
-            return []
+        """Filter events based on selected time range and event type."""
+        # Filter by event type
+        event_type_filter = self.event_filter.currentText()
+        if event_type_filter == "All Events":
+            type_filtered_events = self.events
+        else:
+            type_filtered_events = [
+                event for event in self.events 
+                if event.get('type', '') == event_type_filter
+            ]
         
-        # Start with all events
-        filtered_events = self.events.copy()
-        
-        # Apply time filter
+        # Filter by time range
         time_filter = self.time_filter.currentText()
-        if time_filter != "All Time":
-            current_time = datetime.now()
-            
-            if time_filter == "Last Hour":
-                cutoff_time = current_time - timedelta(hours=1)
-            elif time_filter == "Last 12 Hours":
-                cutoff_time = current_time - timedelta(hours=12)
-            elif time_filter == "Last 24 Hours":
-                cutoff_time = current_time - timedelta(hours=24)
-            
-            # Filter by timestamp
-            # Note: This is a simple filter that assumes timestamps are in HH:MM:SS format
-            # In a real application, you would want to store and compare actual datetime objects
-            cutoff_str = cutoff_time.strftime('%H:%M:%S')
-            filtered_events = [e for e in filtered_events if e.get('timestamp', '') >= cutoff_str]
+        if time_filter == "All Time":
+            return type_filtered_events
         
-        # Apply event type filter
-        event_type = self.event_filter.currentText()
-        if event_type != "All Events":
-            filtered_events = [e for e in filtered_events if e.get('type', '') == event_type]
+        # Set time threshold based on filter
+        now = datetime.now()
+        if time_filter == "Last Hour":
+            threshold = now - timedelta(hours=1)
+        elif time_filter == "Last 12 Hours":
+            threshold = now - timedelta(hours=12)
+        elif time_filter == "Last 24 Hours":
+            threshold = now - timedelta(hours=24)
+        else:
+            return type_filtered_events
         
-        return filtered_events
+        # Convert threshold to string for comparison (HH:MM:SS format)
+        threshold_str = threshold.strftime("%H:%M:%S")
+        
+        # Filter events by time
+        time_filtered_events = []
+        for event in type_filtered_events:
+            timestamp = event.get('timestamp', '')
+            if not timestamp:
+                continue
+            
+            # Simple string comparison works for HH:MM:SS format
+            # For more complex cases, would need to parse the timestamp
+            if timestamp >= threshold_str:
+                time_filtered_events.append(event)
+        
+        return time_filtered_events
     
     def update_statistics(self, events):
-        """Update the statistics cards with the filtered event data."""
-        # Total events
-        self.stat_cards[0]["value_label"].setText(str(len(events)))
-        if len(events) > 0:
-            self.stat_cards[0]["subtitle_label"].setText(f"{len(events)} events in the selected time range")
-        else:
-            self.stat_cards[0]["subtitle_label"].setText("No events detected in the selected time range")
+        """Update the statistics cards with event data."""
+        # Set event count
+        total_events = len(events)
+        total_events_value = self.findChild(QLabel, "total_events_value")
+        if total_events_value:
+            total_events_value.setText(str(total_events))
         
-        # Unique objects tracked
-        track_ids = set()
+        # Calculate unique tracks
+        unique_tracks = set()
+        person_count = 0
+        potential_issues = 0
+        
         for event in events:
+            # Count unique track IDs
             if 'track_id' in event:
-                track_ids.add(event['track_id'])
+                unique_tracks.add(event['track_id'])
+            
+            # Look for person count (this is a simplification, actual implementation would depend on your data structure)
+            if event.get('type') == 'Person at Shelf' or (
+                'description' in event and 'person' in event['description'].lower()):
+                person_count += 1
+            
+            # Count potential issues/alerts
+            if event.get('type') in ['Potential Theft', 'Long Dwell Time'] or event.get('needs_reasoning', False):
+                potential_issues += 1
         
-        self.stat_cards[1]["value_label"].setText(str(len(track_ids)))
-        if len(track_ids) > 0:
-            self.stat_cards[1]["subtitle_label"].setText(f"{len(track_ids)} unique objects tracked")
-        else:
-            self.stat_cards[1]["subtitle_label"].setText("No objects detected in the selected time range")
+        # Update unique tracks count
+        unique_tracks_value = self.findChild(QLabel, "unique_tracks_value") 
+        if unique_tracks_value:
+            unique_tracks_value.setText(str(len(unique_tracks)))
         
-        # Person count (assuming person events have specific identifiers)
-        person_events = [e for e in events if 'Person' in e.get('type', '') or 'person' in e.get('description', '').lower()]
-        person_ids = set()
-        for event in person_events:
-            if 'track_id' in event:
-                person_ids.add(event['track_id'])
+        # Update person count
+        person_count_value = self.findChild(QLabel, "person_count_value")
+        if person_count_value:
+            person_count_value.setText(str(person_count))
         
-        self.stat_cards[2]["value_label"].setText(str(len(person_ids)))
-        if len(person_ids) > 0:
-            self.stat_cards[2]["subtitle_label"].setText(f"{len(person_ids)} people detected")
-        else:
-            self.stat_cards[2]["subtitle_label"].setText("No people detected in the selected time range")
-        
-        # Potential issues (theft, long dwell)
-        issue_events = [e for e in events if 
-                        'Potential Theft' in e.get('type', '') or 
-                        'Long Dwell Time' in e.get('type', '')]
-        
-        self.stat_cards[3]["value_label"].setText(str(len(issue_events)))
-        if len(issue_events) > 0:
-            self.stat_cards[3]["subtitle_label"].setText(f"{len(issue_events)} potential issues detected")
-        else:
-            self.stat_cards[3]["subtitle_label"].setText("No issues detected in the selected time range")
+        # Update potential issues count
+        potential_issues_value = self.findChild(QLabel, "potential_issues_value")
+        if potential_issues_value:
+            potential_issues_value.setText(str(potential_issues))
     
     def update_event_table(self, events):
-        """Update the table with detailed event data."""
-        # Clear existing table data
+        """Update the event table with filtered events."""
         self.event_table.setRowCount(0)
         
         if not events:
-            # Add a single row showing "No events to display"
-            self.event_table.setRowCount(1)
-            no_data_item = QTableWidgetItem("No events to display")
-            no_data_item.setTextAlignment(Qt.AlignCenter)
-            self.event_table.setSpan(0, 0, 1, 5)
-            self.event_table.setItem(0, 0, no_data_item)
             return
         
-        # Add events to table
-        for i, event in enumerate(events):
-            self.event_table.insertRow(i)
-            
-            # Event type
-            type_item = QTableWidgetItem(event.get('type', ''))
-            type_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            self.event_table.setItem(i, 0, type_item)
-            
-            # Event timestamp
+        # Sort events by timestamp (recent first)
+        sorted_events = sorted(events, key=lambda e: e.get('timestamp', ''), reverse=True)
+        
+        self.event_table.setRowCount(len(sorted_events))
+        
+        # Define colors for different event types
+        event_colors = {
+            'ROI Transition': QColor('#EFF6FF'),  # Light blue
+            'ROI Exit': QColor('#F5F3FF'),       # Light purple
+            'Person at Shelf': QColor('#ECFDF5'), # Light green 
+            'Item Pickup': QColor('#F0FDF4'),     # Light green
+            'Potential Theft': QColor('#FEF2F2'), # Light red
+            'Long Dwell Time': QColor('#FFFBEB')  # Light yellow
+        }
+        
+        # Fill table data
+        for i, event in enumerate(sorted_events):
+            # Time
             time_item = QTableWidgetItem(event.get('timestamp', ''))
-            time_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            self.event_table.setItem(i, 1, time_item)
+            self.event_table.setItem(i, 0, time_item)
             
-            # Event description
+            # Event Type
+            type_item = QTableWidgetItem(event.get('type', ''))
+            self.event_table.setItem(i, 1, type_item)
+            
+            # Description
             desc_item = QTableWidgetItem(event.get('description', ''))
-            desc_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.event_table.setItem(i, 2, desc_item)
             
-            # Frame index
-            frame_item = QTableWidgetItem(str(event.get('frame_idx', '')))
-            frame_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            self.event_table.setItem(i, 3, frame_item)
+            # Location (ROI)
+            roi_name = ''
+            if 'to_roi' in event:
+                roi_name = event['to_roi']
+            elif 'roi_name' in event:
+                roi_name = event['roi_name']
+            elif 'from_roi' in event and 'to_roi' in event:
+                roi_name = f"{event['from_roi']} → {event['to_roi']}"
             
-            # Track ID
-            id_item = QTableWidgetItem(str(event.get('track_id', '')))
-            id_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            self.event_table.setItem(i, 4, id_item)
+            location_item = QTableWidgetItem(roi_name)
+            self.event_table.setItem(i, 3, location_item)
             
-            # Style rows for critical events
-            if 'Potential Theft' in event.get('type', ''):
+            # Needs Attention
+            needs_attention = event.get('needs_reasoning', False) or event.get('type') == 'Potential Theft'
+            attention_item = QTableWidgetItem("⚠️" if needs_attention else "")
+            attention_item.setTextAlignment(Qt.AlignCenter)
+            self.event_table.setItem(i, 4, attention_item)
+            
+            # Set background color based on event type
+            if event.get('type') in event_colors:
+                color = event_colors[event.get('type')]
                 for col in range(5):
-                    self.event_table.item(i, col).setBackground(QColor('#FEE2E2'))  # Light red background
-                    self.event_table.item(i, col).setForeground(QColor('#B91C1C'))  # Dark red text
-            elif 'Long Dwell Time' in event.get('type', ''):
-                for col in range(5):
-                    self.event_table.item(i, col).setBackground(QColor('#FEF3C7'))  # Light yellow background
-                    self.event_table.item(i, col).setForeground(QColor('#92400E'))  # Dark yellow/orange text
+                    item = self.event_table.item(i, col)
+                    if item:
+                        item.setBackground(color)
+                        
+                        # Make important events bold
+                        if needs_attention:
+                            font = item.font()
+                            font.setBold(True)
+                            item.setFont(font)
+
+    def update_footfall_chart(self):
+        """Update the footfall analysis chart."""
+        # Get selected time range
+        time_range = self.time_range_combo.currentText()
         
-        # Resize columns to content
-        self.event_table.resizeColumnsToContents() 
+        # Update the footfall chart with the new data
+        self.footfall_chart.update_chart(self.events, time_range)
+        
+        # Update insights based on selected time range and data
+        if self.events:
+            self.insights_content.setText(
+                f"• Peak traffic detected during {time_range.lower()} analysis\n"
+                f"• Consider scheduling staff rotations based on traffic patterns\n"
+                f"• {len(self.events)} total events analyzed in this dataset\n"
+                f"• Use these insights for scheduling, marketing campaigns, and resource allocation"
+            )
+
+    def update_dashboard(self):
+        """Update the entire dashboard with current data and filters."""
+        # Get filtered events based on current selections
+        filtered_events = self.get_filtered_events()
+        
+        # Update statistics
+        self.update_statistics(filtered_events)
+        
+        # Update charts in Overview tab
+        self.event_type_chart.update_chart(filtered_events)
+        self.timeline_chart.update_chart(filtered_events)
+        self.roi_activity_chart.update_chart(filtered_events)
+        self.event_roi_chart.update_chart(filtered_events)
+        
+        # Update advanced charts
+        self.heatmap_chart.update_chart(filtered_events)
+        self.dwell_chart.update_chart(filtered_events)
+        
+        # Update event table
+        self.update_event_table(filtered_events)
+        
+        # Update footfall chart
+        self.update_footfall_chart() 

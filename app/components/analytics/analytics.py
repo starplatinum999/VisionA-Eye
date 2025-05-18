@@ -170,6 +170,7 @@ class AnalyticsManager:
                 'roi_name': event.get('roi_name', None),
                 'dwell_time': event.get('dwell_time', None),
                 'frame_idx': event.get('frame_idx', 0),
+                'class_id': event.get('class_id', None),
                 'has_reasoning': 'reasoning' in event
             }
             
@@ -388,25 +389,55 @@ class AnalyticsManager:
         """
         Display person tracking analysis
         """
-        # Filter events related to persons
+        # Filter events related to persons - Use a more inclusive approach to find all person events
         person_events = self.events_df[
             (self.events_df['type'] == 'Person at Shelf') | 
             (self.events_df['type'] == 'Potential Theft') |
-            (~self.events_df['person_id'].isna())
+            (self.events_df['type'] == 'ROI Transition') |
+            (self.events_df['type'] == 'Long Dwell Time') |
+            (self.events_df['type'] == 'Person Detected') |
+            (~self.events_df['person_id'].isna()) |
+            (~self.events_df['track_id'].isna())
         ]
+        
+        # Filter for person class_id if available
+        if 'class_id' in self.events_df.columns:
+            person_class_events = self.events_df[self.events_df['class_id'] == 0]
+            person_events = pd.concat([person_events, person_class_events]).drop_duplicates()
         
         if person_events.empty:
             st.write("No person tracking data available.")
             return
         
-        # Get unique person IDs
+        # Get unique person IDs - Include track_ids for class_id=0 (persons)
         person_ids = set()
         
-        if 'track_id' in person_events.columns:
-            person_ids.update(person_events[person_events['type'].isin(['Person at Shelf', 'Potential Theft'])]['track_id'].dropna())
+        # Extract person track_ids from raw events (more reliable than the DataFrame)
+        for event in self.events:
+            # Check if this is a person event
+            is_person_event = (
+                event.get('class_id') == 0 or 
+                event.get('type') in ['Person at Shelf', 'Person Detected', 'Potential Theft', 'Long Dwell Time'] or
+                'person_id' in event
+            )
+            
+            if is_person_event and 'track_id' in event and event.get('track_id') is not None:
+                person_ids.add(event.get('track_id'))
+            elif 'person_id' in event and event.get('person_id') is not None:
+                person_ids.add(event.get('person_id'))
         
-        if 'person_id' in person_events.columns:
-            person_ids.update(person_events['person_id'].dropna())
+        # Fallback to DataFrame method if we still have no person IDs
+        if not person_ids:
+            if 'track_id' in person_events.columns:
+                # If class_id is available, filter for persons (class_id=0)
+                if 'class_id' in person_events.columns:
+                    person_track_ids = person_events[person_events['class_id'] == 0]['track_id'].dropna()
+                    person_ids.update(person_track_ids)
+                else:
+                    person_ids.update(person_events['track_id'].dropna())
+            
+            if 'person_id' in person_events.columns:
+                person_ids.update(person_events['person_id'].dropna())
         
         person_ids = list(person_ids)
         
@@ -468,12 +499,173 @@ class AnalyticsManager:
     
     def _display_footfall_heatmap(self):
         """
-        Display footfall heatmap visualization
+        Display footfall heatmap visualization and time-based person counting
         """
         # Check if we have ROI data and ROI transitions
         if not self.roi_areas or 'to_roi' not in self.events_df.columns or self.events_df['to_roi'].isna().all():
             st.write("No footfall data available.")
             return
+        
+        # Add time range selection
+        st.subheader("Footfall Analysis")
+        time_range = st.radio(
+            "Time Range",
+            ["Hourly", "Daily", "Weekly", "Monthly"],
+            horizontal=True
+        )
+        
+        # Filter person events based on the time range
+        if not self.events_df.empty and 'timestamp' in self.events_df.columns:
+            # Make a copy to avoid SettingWithCopyWarning
+            filtered_df = self.events_df.copy()
+            
+            # Add time components for grouping
+            filtered_df['hour'] = filtered_df['timestamp'].dt.hour
+            filtered_df['day'] = filtered_df['timestamp'].dt.day
+            filtered_df['week'] = filtered_df['timestamp'].dt.isocalendar().week
+            filtered_df['month'] = filtered_df['timestamp'].dt.month
+            
+            # Filter person events (both from track_id and person_id)
+            person_events = filtered_df[
+                ((filtered_df['type'] == 'Person at Shelf') | 
+                (filtered_df['type'] == 'ROI Transition') |
+                (filtered_df['type'] == 'Potential Theft') |
+                (filtered_df['type'] == 'Long Dwell Time') |
+                (~filtered_df['person_id'].isna())) &
+                (~filtered_df['track_id'].isna())  # Must have a track_id
+            ]
+            
+            # Create time-series chart of people count
+            if not person_events.empty:
+                # Group by time according to selected range
+                group_col = 'hour'
+                if time_range == "Daily":
+                    group_col = 'day'
+                elif time_range == "Weekly":
+                    group_col = 'week'
+                elif time_range == "Monthly":
+                    group_col = 'month'
+                
+                # Count unique persons per time unit
+                person_counts = {}
+                for time_unit in sorted(person_events[group_col].unique()):
+                    time_slice = person_events[person_events[group_col] == time_unit]
+                    # Count unique track_ids in this time slice
+                    unique_persons = set()
+                    if 'track_id' in time_slice.columns:
+                        unique_persons.update(time_slice['track_id'].dropna())
+                    if 'person_id' in time_slice.columns:
+                        unique_persons.update(time_slice['person_id'].dropna())
+                    
+                    # Store the count
+                    unit_label = time_unit
+                    if time_range == "Hourly":
+                        unit_label = f"{time_unit}:00"
+                    elif time_range == "Monthly":
+                        # Convert month number to name
+                        month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                        unit_label = month_names[time_unit-1] if 1 <= time_unit <= 12 else time_unit
+                        
+                    person_counts[unit_label] = len(unique_persons)
+                
+                # Convert to DataFrame for plotting
+                if person_counts:
+                    df_counts = pd.DataFrame({
+                        'Time': list(person_counts.keys()),
+                        'People Count': list(person_counts.values())
+                    })
+                    
+                    # Create bar chart with increased height
+                    fig = px.bar(
+                        df_counts,
+                        x='Time',
+                        y='People Count',
+                        color='People Count',
+                        color_continuous_scale='Viridis',
+                        height=400  # Increased height for better visibility
+                    )
+                    
+                    # Find peak traffic times
+                    if len(df_counts) > 0 and df_counts['People Count'].max() > 0:
+                        try:
+                            peak_idx = df_counts['People Count'].idxmax()
+                            peak_time = df_counts.loc[peak_idx]['Time']
+                            peak_count = df_counts['People Count'].max()
+                            
+                            # Add peak line
+                            fig.add_hline(y=peak_count, line_dash="dash", line_color="red",
+                                          annotation_text=f"Peak: {peak_count} people", 
+                                          annotation_position="top right")
+                            
+                            # Add annotations for peak time
+                            peak_index = df_counts[df_counts['Time'] == peak_time].index[0]
+                            fig.add_annotation(
+                                x=peak_index,
+                                y=peak_count,
+                                text=f"Peak Traffic",
+                                showarrow=True,
+                                arrowhead=1
+                            )
+                        except Exception as e:
+                            st.warning(f"Could not detect peak traffic: {e}")
+                    
+                    # Update layout
+                    time_unit = "Hour" if time_range == "Hourly" else time_range[:-2]  # Remove 'ly' suffix
+                    fig.update_layout(
+                        title=f"People Count by {time_unit}",
+                        xaxis_title=time_unit,
+                        yaxis_title="Number of People",
+                        coloraxis_showscale=False
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Add analytics insights
+                    with st.expander("Footfall Insights"):
+                        if len(df_counts) > 0 and df_counts['People Count'].max() > 0:
+                            try:
+                                avg_count = df_counts['People Count'].mean()
+                                total_count = df_counts['People Count'].sum()
+                                peak_idx = df_counts['People Count'].idxmax()
+                                peak_time = df_counts.loc[peak_idx]['Time']
+                                peak_count = df_counts['People Count'].max()
+                                
+                                st.markdown(f"""
+                                ### Key Metrics
+                                - **Total People Detected:** {total_count}
+                                - **Average People per {time_unit}:** {avg_count:.1f}
+                                - **Peak Traffic Time:** {peak_time} with {peak_count} people
+                                
+                                ### Traffic Patterns
+                                - {100*peak_count/max(avg_count, 1):.1f}% higher traffic during peak times compared to average
+                                """)
+                                
+                                # Traffic distribution table
+                                traffic_data = []
+                                for time_val, count in person_counts.items():
+                                    traffic_category = "Low"
+                                    if count > 0.7 * peak_count and peak_count > 0:
+                                        traffic_category = "High"
+                                    elif count > 0.4 * peak_count and peak_count > 0:
+                                        traffic_category = "Medium"
+                                        
+                                    traffic_data.append({
+                                        "Time": time_val,
+                                        "People Count": count,
+                                        "Traffic Level": traffic_category
+                                    })
+                                    
+                                if traffic_data:
+                                    traffic_df = pd.DataFrame(traffic_data)
+                                    st.write("### Traffic Distribution")
+                                    st.dataframe(traffic_df)
+                            except Exception as e:
+                                st.warning(f"Could not generate traffic insights: {e}")
+                        else:
+                            st.info("Not enough data to generate footfall insights.")
+                else:
+                    st.info("No footfall data available for the selected time range.")
         
         # Count events by ROI
         roi_events = []

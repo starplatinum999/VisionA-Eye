@@ -3,11 +3,11 @@ from PySide6.QtWidgets import (
     QMainWindow, QTabWidget, QWidget, QVBoxLayout, 
     QHBoxLayout, QLabel, QPushButton, QFileDialog, 
     QStatusBar, QMessageBox, QApplication, QLineEdit,
-    QDialog, QFormLayout, QTextEdit, QFrame
+    QDialog, QFormLayout, QTextEdit, QFrame, QSplashScreen
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon, QFont, QPalette, QColor
-from PySide6.QtWidgets import QStyle
+from PySide6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QIcon, QFont, QPalette, QColor, QPixmap, QLinearGradient, QBrush, QPainter, QFontDatabase
+import os
 
 from app.ui.video_widget import VideoWidget
 from app.ui.roi_widget import ROIWidget
@@ -24,8 +24,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Vision AI - Smart Surveillance")
         self.setMinimumSize(1280, 900)
         
-        # Set light theme for entire application
-        self.apply_light_theme()
+        # Load custom fonts if available
+        self.load_fonts()
+        
+        # Set modern theme for entire application
+        self.apply_modern_theme()
         
         # Shared data between tabs
         self.video_path = None
@@ -36,28 +39,32 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
         
-        # Style the tabs
+        # Style the tabs with modern look
         self.tabs.setStyleSheet("""
             QTabWidget::pane {
                 border: 1px solid #E4E7EB;
                 background-color: #FFFFFF;
-                border-radius: 0 0 8px 8px;
+                border-radius: 12px;
+                padding: 10px;
             }
             QTabBar::tab {
                 background-color: #F5F7FA;
                 color: #4B5563;
                 border: 1px solid #E4E7EB;
                 border-bottom: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                padding: 8px 16px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                padding: 10px 20px;
                 margin-right: 4px;
-                font-weight: 500;
+                font-weight: 600;
+                min-width: 120px;
+                font-size: 14px;
             }
             QTabBar::tab:selected {
-                background-color: #FFFFFF;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                          stop:0 #FFFFFF, stop:1 #F0F5FF);
                 color: #2563EB;
-                border-bottom: 2px solid #2563EB;
+                border-bottom: 3px solid #2563EB;
             }
             QTabBar::tab:hover:!selected {
                 background-color: #EFF6FF;
@@ -74,6 +81,8 @@ class MainWindow(QMainWindow):
                 background-color: #F5F7FA;
                 color: #4B5563;
                 border-top: 1px solid #E4E7EB;
+                padding: 5px;
+                font-size: 13px;
             }
         """)
         
@@ -83,44 +92,60 @@ class MainWindow(QMainWindow):
         self.setup_surveillance_tab()
         self.setup_analytics_tab()
     
-    def apply_light_theme(self):
-        """Apply a light theme to the entire application."""
+    def load_fonts(self):
+        """Load custom fonts if available in the system."""
+        # Preferred fonts for modern UI
+        preferred_fonts = ["SF Pro Display", "Segoe UI", "Roboto", "Inter", "Helvetica Neue"]
+        
+        # Check if fonts are available
+        available_fonts = QFontDatabase().families()
+        
+        # Set application font to first available preferred font
+        for font_name in preferred_fonts:
+            if any(font_name.lower() in f.lower() for f in available_fonts):
+                app_font = QFont(font_name)
+                QApplication.setFont(app_font)
+                break
+    
+    def apply_modern_theme(self):
+        """Apply a modern theme to the entire application."""
         app = QApplication.instance()
         
         # Set fusion style for a more modern look
         app.setStyle("Fusion")
         
-        # Create a light palette with a professional color scheme
-        light_palette = QPalette()
+        # Create a light palette with a professional blue accent color scheme
+        palette = QPalette()
         
         # Base colors
-        light_palette.setColor(QPalette.Window, QColor("#FFFFFF"))         # White
-        light_palette.setColor(QPalette.WindowText, QColor("#1F2937"))     # Charcoal text
-        light_palette.setColor(QPalette.Base, QColor("#F5F7FA"))          # Very light gray
-        light_palette.setColor(QPalette.AlternateBase, QColor("#E4E7EB"))  # Light gray
-        light_palette.setColor(QPalette.ToolTipBase, QColor("#F5F7FA"))
-        light_palette.setColor(QPalette.ToolTipText, QColor("#1F2937"))
+        palette.setColor(QPalette.Window, QColor("#FFFFFF"))         # White
+        palette.setColor(QPalette.WindowText, QColor("#1F2937"))     # Charcoal text
+        palette.setColor(QPalette.Base, QColor("#F5F7FA"))          # Very light gray
+        palette.setColor(QPalette.AlternateBase, QColor("#E4E7EB"))  # Light gray
+        palette.setColor(QPalette.ToolTipBase, QColor("#F5F7FA"))
+        palette.setColor(QPalette.ToolTipText, QColor("#1F2937"))
         
         # Text and button colors
-        light_palette.setColor(QPalette.Text, QColor("#1F2937"))          # Charcoal text
-        light_palette.setColor(QPalette.Button, QColor("#F9FAFB"))        # Lighter gray for buttons
-        light_palette.setColor(QPalette.ButtonText, QColor("#1F2937"))    # Charcoal text
-        light_palette.setColor(QPalette.BrightText, QColor("#EF4444"))    # Error Red
+        palette.setColor(QPalette.Text, QColor("#1F2937"))          # Charcoal text
+        palette.setColor(QPalette.Button, QColor("#F9FAFB"))        # Lighter gray for buttons
+        palette.setColor(QPalette.ButtonText, QColor("#1F2937"))    # Charcoal text
+        palette.setColor(QPalette.BrightText, QColor("#EF4444"))    # Error Red
         
         # Highlight and link colors
-        light_palette.setColor(QPalette.Link, QColor("#2563EB"))          # Blue links
-        light_palette.setColor(QPalette.Highlight, QColor("#3B82F6"))     # Blue highlight
-        light_palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF")) # White on highlight
+        palette.setColor(QPalette.Link, QColor("#2563EB"))          # Blue links
+        palette.setColor(QPalette.Highlight, QColor("#3B82F6"))     # Blue highlight
+        palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF")) # White on highlight
         
         # Set the palette
-        app.setPalette(light_palette)
+        app.setPalette(palette)
         
-        # Set the default style sheet
+        # Set the default style sheet with modern controls
         app.setStyleSheet("""
             QWidget {
                 background-color: #FFFFFF;
                 color: #1F2937;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Display", Roboto, Inter, Helvetica, Arial, sans-serif;
+                font-size: 14px;
             }
             QLabel {
                 background: transparent;
@@ -129,34 +154,50 @@ class MainWindow(QMainWindow):
                 color: #1F2937;
             }
             QPushButton {
-                background-color: #F9FAFB;
-                color: #1F2937;
-                border: 1px solid #D1D5DB;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: 500;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                          stop:0 #4F86F7, stop:1 #3B72D9);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-weight: 600;
                 font-size: 14px;
+                min-height: 20px;
             }
             QPushButton:hover {
-                background-color: #EFF6FF;
-                border-color: #93C5FD;
-                color: #1D4ED8;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                          stop:0 #5D93FF, stop:1 #4B82E9);
+                color: white;
             }
             QPushButton:pressed {
-                background-color: #DBEAFE;
-                border-color: #60A5FA;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                          stop:0 #3A67BA, stop:1 #2B57A9);
             }
-            QLineEdit, QComboBox {
+            QPushButton:disabled {
+                background: #D1D5DB;
+                color: #9CA3AF;
+            }
+            QLineEdit, QComboBox, QTextEdit {
                 background-color: #F9FAFB;
                 color: #1F2937;
                 border: 1px solid #D1D5DB;
-                border-radius: 6px;
-                padding: 8px;
+                border-radius: 8px;
+                padding: 10px;
                 font-size: 14px;
+                selection-background-color: #93C5FD;
             }
-            QLineEdit:focus, QComboBox:focus {
+            QLineEdit:focus, QComboBox:focus, QTextEdit:focus {
                 border-color: #3B82F6;
                 border-width: 2px;
+                background-color: #FFFFFF;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 24px;
+            }
+            QComboBox::down-arrow {
+                color: #6B7280;
+                font-size: 12px;
             }
             QStatusBar {
                 background-color: #F5F7FA;
@@ -165,13 +206,14 @@ class MainWindow(QMainWindow):
             }
             QScrollBar:vertical {
                 background-color: #F5F7FA;
-                width: 12px;
+                width: 14px;
                 margin: 0px;
             }
             QScrollBar::handle:vertical {
                 background-color: #D1D5DB;
                 min-height: 30px;
-                border-radius: 6px;
+                border-radius: 7px;
+                margin: 2px;
             }
             QScrollBar::handle:vertical:hover {
                 background-color: #9CA3AF;
@@ -181,13 +223,14 @@ class MainWindow(QMainWindow):
             }
             QScrollBar:horizontal {
                 background-color: #F5F7FA;
-                height: 12px;
+                height: 14px;
                 margin: 0px;
             }
             QScrollBar::handle:horizontal {
                 background-color: #D1D5DB;
                 min-width: 30px;
-                border-radius: 6px;
+                border-radius: 7px;
+                margin: 2px;
             }
             QScrollBar::handle:horizontal:hover {
                 background-color: #9CA3AF;
@@ -195,248 +238,272 @@ class MainWindow(QMainWindow):
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                 width: 0px;
             }
+            QFrame.card {
+                background-color: white;
+                border-radius: 12px;
+                border: 1px solid #E4E7EB;
+                padding: 15px;
+            }
+            QFrame.card:hover {
+                border-color: #93C5FD;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            }
+            QLabel.card-title {
+                color: #1F2937;
+                font-size: 18px;
+                font-weight: bold;
+                margin-bottom: 10px;
+            }
+            QLabel.card-subtitle {
+                color: #4B5563;
+                font-size: 14px;
+                margin-bottom: 15px;
+            }
         """)
     
     def setup_home_tab(self):
-        """Setup the home tab with file/camera selection."""
-        home_widget = QWidget()
-        main_layout = QVBoxLayout(home_widget)
-        main_layout.setContentsMargins(30, 30, 30, 30)
-        main_layout.setAlignment(Qt.AlignCenter)
+        """Set up the home tab with welcome screen and video selection."""
+        # Create the home tab
+        home_tab = QWidget()
+        self.tabs.addTab(home_tab, "Home")
+        
+        # Create layout for home tab
+        layout = QVBoxLayout(home_tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)
         
         # Header section
-        header = QWidget()
-        header_layout = QVBoxLayout(header)
-        header_layout.setAlignment(Qt.AlignCenter)
-        header_layout.setSpacing(10)
-        
-        # Title
-        title_label = QLabel("Welcome to Vision AI")
-        title_label.setFont(QFont("Arial", 24, QFont.Bold))
-        title_label.setStyleSheet("color: #3B82F6;")
-        title_label.setAlignment(Qt.AlignCenter)
-        header_layout.addWidget(title_label)
-        
-        # Subtitle
-        subtitle_label = QLabel("Smart Surveillance System")
-        subtitle_label.setFont(QFont("Arial", 16))
-        subtitle_label.setStyleSheet("color: #111827; margin-bottom: 5px;")
-        subtitle_label.setAlignment(Qt.AlignCenter)
-        header_layout.addWidget(subtitle_label)
-        
-        # Description
-        description = QLabel("Upload a video or connect to a stream for AI-powered analysis")
-        description.setStyleSheet("color: #4B5563; font-size: 14px; margin-bottom: 20px;")
-        description.setAlignment(Qt.AlignCenter)
-        header_layout.addWidget(description)
-        
-        main_layout.addWidget(header)
-        
-        # Content container (centered and width-limited)
-        content_container = QWidget()
-        content_container.setMaximumWidth(800)
-        content_layout = QVBoxLayout(content_container)
-        content_layout.setContentsMargins(0, 20, 0, 0)
-        content_layout.setSpacing(20)
-        
-        # File selection section
-        file_section = QFrame()
-        file_section.setFrameShape(QFrame.StyledPanel)
-        file_section.setStyleSheet("""
-            QFrame {
-                background-color: #FFFFFF;
-                border: 1px solid #E4E7EB;
-                border-radius: 8px;
+        header_frame = QFrame()
+        header_frame.setObjectName("header")
+        header_frame.setStyleSheet("""
+            #header {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                          stop:0 #3B82F6, stop:1 #1E40AF);
+                border-radius: 12px;
+                padding: 20px;
             }
         """)
+        header_layout = QVBoxLayout(header_frame)
         
-        file_layout = QVBoxLayout(file_section)
-        file_layout.setContentsMargins(20, 20, 20, 20)
-        file_layout.setSpacing(15)
-        
-        # Section title
-        file_title = QLabel("Video File")
-        file_title.setFont(QFont("Arial", 16, QFont.Bold))
-        file_title.setStyleSheet("color: #111827;")
-        file_layout.addWidget(file_title)
-        
-        # Description
-        file_desc = QLabel("Select a video file for analysis")
-        file_desc.setStyleSheet("color: #6B7280;")
-        file_layout.addWidget(file_desc)
-        
-        # Button and status
-        file_controls = QHBoxLayout()
-        file_controls.setSpacing(15)
-        
-        upload_button = QPushButton("Select Video File")
-        upload_button.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
-        upload_button.clicked.connect(self.select_video_file)
-        upload_button.setStyleSheet("""
-            QPushButton {
-                background-color: #3B82F6;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-weight: bold;
-                min-width: 180px;
-            }
-            QPushButton:hover {
-                background-color: #2563EB;
-            }
-            QPushButton:pressed {
-                background-color: #1D4ED8;
-            }
+        # Header title and subtitle
+        title = QLabel("Welcome to Vision AI")
+        title.setStyleSheet("""
+            font-size: 32px;
+            font-weight: bold;
+            color: white;
         """)
         
-        file_controls.addWidget(upload_button)
-        
-        self.file_path_label = QLabel("No file selected")
-        self.file_path_label.setStyleSheet("color: #6B7280;")
-        file_controls.addWidget(self.file_path_label, 1)
-        
-        file_layout.addLayout(file_controls)
-        content_layout.addWidget(file_section)
-        
-        # RTSP stream section
-        rtsp_section = QFrame()
-        rtsp_section.setFrameShape(QFrame.StyledPanel)
-        rtsp_section.setStyleSheet("""
-            QFrame {
-                background-color: #FFFFFF;
-                border: 1px solid #E4E7EB;
-                border-radius: 8px;
-            }
+        subtitle = QLabel("Intelligent Surveillance for Business Security")
+        subtitle.setStyleSheet("""
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.9);
+            margin-top: 5px;
         """)
         
-        rtsp_layout = QVBoxLayout(rtsp_section)
-        rtsp_layout.setContentsMargins(20, 20, 20, 20)
-        rtsp_layout.setSpacing(15)
+        header_layout.addWidget(title)
+        header_layout.addWidget(subtitle)
+        layout.addWidget(header_frame)
         
-        # Section title
-        rtsp_title = QLabel("Camera Stream")
-        rtsp_title.setFont(QFont("Arial", 16, QFont.Bold))
-        rtsp_title.setStyleSheet("color: #111827;")
-        rtsp_layout.addWidget(rtsp_title)
+        # Cards container
+        cards_widget = QWidget()
+        cards_layout = QHBoxLayout(cards_widget)
+        cards_layout.setSpacing(20)
         
-        # Description
-        rtsp_desc = QLabel("Connect to an RTSP camera stream")
-        rtsp_desc.setStyleSheet("color: #6B7280;")
-        rtsp_layout.addWidget(rtsp_desc)
+        # Video File Card
+        video_card = QFrame()
+        video_card.setObjectName("videoCard")
+        video_card.setProperty("class", "card")
+        video_card.setMinimumHeight(300)
+        video_card_layout = QVBoxLayout(video_card)
         
-        # Button and status
-        rtsp_controls = QHBoxLayout()
-        rtsp_controls.setSpacing(15)
+        # Card icon
+        video_icon_label = QLabel()
+        video_icon_label.setAlignment(Qt.AlignCenter)
+        video_icon_label.setStyleSheet("""
+            background-color: #EFF6FF;
+            border-radius: 30px;
+            padding: 15px;
+            margin-bottom: 15px;
+        """)
+        # You can replace this with an actual icon later
+        video_icon = QLabel("🎬")
+        video_icon.setStyleSheet("font-size: 32px; color: #3B82F6;")
+        video_icon_layout = QVBoxLayout(video_icon_label)
+        video_icon_layout.addWidget(video_icon)
         
-        rtsp_button = QPushButton("Connect to RTSP Stream")
-        rtsp_button.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DriveNetIcon))
+        # Card content
+        video_title = QLabel("Upload Video File")
+        video_title.setProperty("class", "card-title")
+        
+        video_desc = QLabel("Import a pre-recorded video file for analysis")
+        video_desc.setProperty("class", "card-subtitle")
+        video_desc.setWordWrap(True)
+        
+        video_button = QPushButton("Select Video File")
+        video_button.setMinimumWidth(200)
+        video_button.clicked.connect(self.select_video_file)
+        
+        video_card_layout.addWidget(video_icon_label)
+        video_card_layout.addWidget(video_title)
+        video_card_layout.addWidget(video_desc)
+        video_card_layout.addWidget(video_button)
+        video_card_layout.addStretch()
+        
+        # Camera Card
+        camera_card = QFrame()
+        camera_card.setProperty("class", "card")
+        camera_card.setMinimumHeight(300)
+        camera_card_layout = QVBoxLayout(camera_card)
+        
+        # Card icon
+        camera_icon_label = QLabel()
+        camera_icon_label.setAlignment(Qt.AlignCenter)
+        camera_icon_label.setStyleSheet("""
+            background-color: #ECFDF5;
+            border-radius: 30px;
+            padding: 15px;
+            margin-bottom: 15px;
+        """)
+        # You can replace this with an actual icon later
+        camera_icon = QLabel("📹")
+        camera_icon.setStyleSheet("font-size: 32px; color: #10B981;")
+        camera_icon_layout = QVBoxLayout(camera_icon_label)
+        camera_icon_layout.addWidget(camera_icon)
+        
+        # Card content
+        camera_title = QLabel("Connect to Camera")
+        camera_title.setProperty("class", "card-title")
+        
+        camera_desc = QLabel("Connect to a webcam or IP camera for live monitoring")
+        camera_desc.setProperty("class", "card-subtitle")
+        camera_desc.setWordWrap(True)
+        
+        camera_button = QPushButton("Connect Camera")
+        camera_button.setMinimumWidth(200)
+        camera_button.clicked.connect(self.connect_to_camera)
+        
+        camera_card_layout.addWidget(camera_icon_label)
+        camera_card_layout.addWidget(camera_title)
+        camera_card_layout.addWidget(camera_desc)
+        camera_card_layout.addWidget(camera_button)
+        
+        # RTSP stream card
+        rtsp_card = QFrame()
+        rtsp_card.setProperty("class", "card")
+        rtsp_card.setMinimumHeight(300)
+        rtsp_card_layout = QVBoxLayout(rtsp_card)
+        
+        # Card icon
+        rtsp_icon_label = QLabel()
+        rtsp_icon_label.setAlignment(Qt.AlignCenter)
+        rtsp_icon_label.setStyleSheet("""
+            background-color: #FEF3F2;
+            border-radius: 30px;
+            padding: 15px;
+            margin-bottom: 15px;
+        """)
+        # You can replace this with an actual icon later
+        rtsp_icon = QLabel("🔄")
+        rtsp_icon.setStyleSheet("font-size: 32px; color: #F43F5E;")
+        rtsp_icon_layout = QVBoxLayout(rtsp_icon_label)
+        rtsp_icon_layout.addWidget(rtsp_icon)
+        
+        # Card content
+        rtsp_title = QLabel("RTSP Stream")
+        rtsp_title.setProperty("class", "card-title")
+        
+        rtsp_desc = QLabel("Connect to an RTSP stream from a network camera")
+        rtsp_desc.setProperty("class", "card-subtitle")
+        rtsp_desc.setWordWrap(True)
+        
+        rtsp_button = QPushButton("Connect to RTSP")
+        rtsp_button.setMinimumWidth(200)
         rtsp_button.clicked.connect(self.connect_to_rtsp)
-        rtsp_button.setStyleSheet("""
-            QPushButton {
-                background-color: #3B82F6;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-weight: bold;
-                min-width: 180px;
-            }
-            QPushButton:hover {
-                background-color: #2563EB;
-            }
-            QPushButton:pressed {
-                background-color: #1D4ED8;
-            }
+        
+        rtsp_card_layout.addWidget(rtsp_icon_label)
+        rtsp_card_layout.addWidget(rtsp_title)
+        rtsp_card_layout.addWidget(rtsp_desc)
+        rtsp_card_layout.addWidget(rtsp_button)
+        
+        # Add cards to layout
+        cards_layout.addWidget(video_card)
+        cards_layout.addWidget(camera_card)
+        cards_layout.addWidget(rtsp_card)
+        
+        layout.addWidget(cards_widget)
+        
+        # Add feature highlights section
+        features_frame = QFrame()
+        features_frame.setProperty("class", "card")
+        features_layout = QVBoxLayout(features_frame)
+        
+        features_title = QLabel("Key Features")
+        features_title.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 15px;
         """)
         
-        rtsp_controls.addWidget(rtsp_button)
+        features_grid = QHBoxLayout()
         
-        self.camera_status_label = QLabel("No camera connected")
-        self.camera_status_label.setStyleSheet("color: #6B7280;")
-        rtsp_controls.addWidget(self.camera_status_label, 1)
+        # Feature 1
+        feature1 = QVBoxLayout()
+        feature1_icon = QLabel("🔍")
+        feature1_icon.setStyleSheet("font-size: 24px;")
+        feature1_title = QLabel("Object Detection")
+        feature1_title.setStyleSheet("font-weight: bold; font-size: 16px;")
+        feature1_desc = QLabel("Real-time detection of people, objects, and activities")
+        feature1_desc.setWordWrap(True)
+        feature1.addWidget(feature1_icon)
+        feature1.addWidget(feature1_title)
+        feature1.addWidget(feature1_desc)
         
-        rtsp_layout.addLayout(rtsp_controls)
-        content_layout.addWidget(rtsp_section)
+        # Feature 2
+        feature2 = QVBoxLayout()
+        feature2_icon = QLabel("🎯")
+        feature2_icon.setStyleSheet("font-size: 24px;")
+        feature2_title = QLabel("Region Tracking")
+        feature2_title.setStyleSheet("font-weight: bold; font-size: 16px;")
+        feature2_desc = QLabel("Define custom areas of interest for targeted monitoring")
+        feature2_desc.setWordWrap(True)
+        feature2.addWidget(feature2_icon)
+        feature2.addWidget(feature2_title)
+        feature2.addWidget(feature2_desc)
         
-        # Status section
-        status_section = QFrame()
-        status_section.setFrameShape(QFrame.StyledPanel)
-        status_section.setStyleSheet("""
-            QFrame {
-                background-color: #F9FAFB;
-                border: 1px solid #E4E7EB;
-                border-radius: 8px;
-            }
-        """)
+        # Feature 3
+        feature3 = QVBoxLayout()
+        feature3_icon = QLabel("🧠")
+        feature3_icon.setStyleSheet("font-size: 24px;")
+        feature3_title = QLabel("AI Reasoning")
+        feature3_title.setStyleSheet("font-weight: bold; font-size: 16px;")
+        feature3_desc = QLabel("Smart event detection and anomaly identification")
+        feature3_desc.setWordWrap(True)
+        feature3.addWidget(feature3_icon)
+        feature3.addWidget(feature3_title)
+        feature3.addWidget(feature3_desc)
         
-        status_layout = QHBoxLayout(status_section)
-        status_layout.setContentsMargins(20, 15, 20, 15)
+        # Feature 4
+        feature4 = QVBoxLayout()
+        feature4_icon = QLabel("📊")
+        feature4_icon.setStyleSheet("font-size: 24px;")
+        feature4_title = QLabel("Analytics")
+        feature4_title.setStyleSheet("font-weight: bold; font-size: 16px;")
+        feature4_desc = QLabel("Comprehensive data visualization and reporting")
+        feature4_desc.setWordWrap(True)
+        feature4.addWidget(feature4_icon)
+        feature4.addWidget(feature4_title)
+        feature4.addWidget(feature4_desc)
         
-        # Model status
-        model_widget = QWidget()
-        model_layout = QVBoxLayout(model_widget)
-        model_layout.setContentsMargins(0, 0, 0, 0)
-        model_layout.setSpacing(3)
+        features_grid.addLayout(feature1)
+        features_grid.addLayout(feature2)
+        features_grid.addLayout(feature3)
+        features_grid.addLayout(feature4)
         
-        model_label = QLabel("AI Model")
-        model_label.setStyleSheet("color: #6B7280; font-size: 12px;")
-        model_layout.addWidget(model_label)
+        features_layout.addWidget(features_title)
+        features_layout.addLayout(features_grid)
         
-        model_status = QLabel("Loaded")
-        model_status.setStyleSheet("color: #10B981; font-weight: bold;")
-        model_layout.addWidget(model_status)
-        
-        status_layout.addWidget(model_widget, 1)
-        
-        # System status
-        system_widget = QWidget()
-        system_layout = QVBoxLayout(system_widget)
-        system_layout.setContentsMargins(0, 0, 0, 0)
-        system_layout.setSpacing(3)
-        
-        system_label = QLabel("System")
-        system_label.setStyleSheet("color: #6B7280; font-size: 12px;")
-        system_layout.addWidget(system_label)
-        
-        system_status = QLabel("Ready")
-        system_status.setStyleSheet("color: #10B981; font-weight: bold;")
-        system_layout.addWidget(system_status)
-        
-        status_layout.addWidget(system_widget, 1)
-        
-        # Last activity
-        activity_widget = QWidget()
-        activity_layout = QVBoxLayout(activity_widget)
-        activity_layout.setContentsMargins(0, 0, 0, 0)
-        activity_layout.setSpacing(3)
-        
-        activity_label = QLabel("Last Activity")
-        activity_label.setStyleSheet("color: #6B7280; font-size: 12px;")
-        activity_layout.addWidget(activity_label)
-        
-        activity_status = QLabel("None")
-        activity_status.setStyleSheet("color: #6B7280; font-weight: bold;")
-        activity_layout.addWidget(activity_status)
-        
-        status_layout.addWidget(activity_widget, 1)
-        
-        content_layout.addWidget(status_section)
-        
-        # Add content to main layout (centered)
-        container_layout = QHBoxLayout()
-        container_layout.addStretch()
-        container_layout.addWidget(content_container)
-        container_layout.addStretch()
-        main_layout.addLayout(container_layout)
-        
-        # Footer
-        footer = QLabel("Vision AI - Real-time object detection and tracking")
-        footer.setAlignment(Qt.AlignCenter)
-        footer.setStyleSheet("color: #9CA3AF; margin-top: 20px;")
-        main_layout.addWidget(footer)
-        
-        self.tabs.addTab(home_widget, "Home")
+        layout.addWidget(features_frame)
+        layout.addStretch()
     
     def setup_roi_tab(self):
         """Setup the ROI configuration tab."""
@@ -480,7 +547,6 @@ class MainWindow(QMainWindow):
         
         if file_path:
             self.video_path = file_path
-            self.file_path_label.setText(file_path)
             self.status_bar.showMessage(f"Video loaded: {file_path}")
             
             # Update video widget with the frame
@@ -504,7 +570,6 @@ class MainWindow(QMainWindow):
             # Test camera connection
             self.video_widget.load_video(camera_index, is_camera=True)
             
-            self.camera_status_label.setText(f"Connected to camera {camera_index}")
             self.status_bar.showMessage(f"Camera connected: {camera_index}")
             
             # Update ROI widget with the first frame
@@ -654,7 +719,6 @@ class MainWindow(QMainWindow):
             if rtsp_url:
                 try:
                     # Update status before attempting connection
-                    self.camera_status_label.setText(f"Connecting to RTSP stream...")
                     self.status_bar.showMessage(f"Connecting to RTSP stream: {rtsp_url}")
                     
                     # Process events to update UI
@@ -667,7 +731,6 @@ class MainWindow(QMainWindow):
                     self.video_widget.load_video(rtsp_url, is_camera=True)
                     
                     # Update UI
-                    self.camera_status_label.setText(f"Connected to RTSP stream")
                     self.status_bar.showMessage(f"RTSP stream connected: {rtsp_url}")
                     
                     # Update ROI widget with the first frame
@@ -681,7 +744,6 @@ class MainWindow(QMainWindow):
                     QMessageBox.critical(self, "Stream Error", error_message)
                     
                     # Reset status
-                    self.camera_status_label.setText("No camera connected")
                     self.status_bar.showMessage("RTSP connection failed")
             else:
                 QMessageBox.warning(self, "Input Error", "Please enter a valid RTSP URL.")

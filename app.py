@@ -26,6 +26,10 @@ if 'roi_areas' not in st.session_state:
     st.session_state.roi_areas = {}
 if 'roi_colors' not in st.session_state:
     st.session_state.roi_colors = {}
+if 'roi_points' not in st.session_state:
+    st.session_state.roi_points = {}
+if 'quad_points' not in st.session_state:
+    st.session_state.quad_points = []
 if 'events' not in st.session_state:
     st.session_state.events = []
 if 'processed_video' not in st.session_state:
