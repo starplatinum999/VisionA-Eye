@@ -20,9 +20,10 @@ from PySide6.QtWidgets import (
     QTabWidget, QScrollArea, QSplitter, QTableWidget,
     QTableWidgetItem, QHeaderView, QStackedWidget,
     QRadioButton, QButtonGroup, QCheckBox, QDateEdit,
-    QTimeEdit, QDialog, QSlider, QToolTip, QGraphicsDropShadowEffect
+    QTimeEdit, QDialog, QSlider, QToolTip, QGraphicsDropShadowEffect,
+    QSizePolicy
 )
-from PySide6.QtCore import Qt, QSize, Signal, QTimer, QDateTime, QDate, QTime
+from PySide6.QtCore import Qt, QSize, Signal, QTimer, QDateTime, QDate, QTime, QObject
 from PySide6.QtGui import QFont, QColor, QPalette, QPixmap, QIcon, QCursor, QBrush, QLinearGradient, QPainter, QPainterPath
 
 class MplCanvas(FigureCanvas):
@@ -126,7 +127,7 @@ class EventBarChart(MplCanvas):
         plt.setp(self.axes.get_xticklabels(), rotation=30, ha='right', fontsize=9)
         
         # Add grid lines for better readability
-        self.axes.grid(axis='y', linestyle='--', alpha=0.3)
+        self.axes.grid(axis='y', linestyle='--', alpha=0.3, linewidth=1.5)
         
         # Remove top and right spines
         self.axes.spines['top'].set_visible(False)
@@ -213,7 +214,7 @@ class TimelineChart(MplCanvas):
         plt.setp(self.axes.get_xticklabels(), rotation=45, ha='right', fontsize=9)
         
         # Add grid lines
-        self.axes.grid(axis='y', linestyle='--', alpha=0.3)
+        self.axes.grid(axis='y', linestyle='--', alpha=0.3, linewidth=1.5)
         
         # Add legend with better styling
         legend = self.axes.legend(
@@ -404,7 +405,7 @@ class EventTypeByRoiChart(MplCanvas):
         plt.setp(self.axes.get_xticklabels(), rotation=30, ha='right', fontsize=9)
         
         # Add grid lines for better readability
-        self.axes.grid(axis='y', linestyle='--', alpha=0.3)
+        self.axes.grid(axis='y', linestyle='--', alpha=0.3, linewidth=1.5)
         
         # Add legend with better styling
         self.axes.legend(
@@ -631,7 +632,7 @@ class DwellTimeChart(MplCanvas):
         self.axes.tick_params(axis='y', labelsize=9)
         
         # Add grid lines for better readability
-        self.axes.grid(axis='x', linestyle='--', alpha=0.3)
+        self.axes.grid(axis='x', linestyle='--', alpha=0.3, linewidth=1.5)
         
         # Remove top and right spines
         self.axes.spines['top'].set_visible(False)
@@ -645,14 +646,48 @@ class FootfallAnalysisChart(MplCanvas):
     """Chart showing footfall (number of people) over time periods."""
     def __init__(self, *args, **kwargs):
         super(FootfallAnalysisChart, self).__init__(*args, **kwargs)
-        # Set a larger figure size to increase height
-        self.fig.set_size_inches(10, 6)
+        # Set a much larger figure size for better visibility
+        self.fig.set_size_inches(14, 9)  # Further increased from 12x8
+        self.setMinimumHeight(700)  # Increased minimum height
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
+        # Configure figure to adjust to container size
+        self.fig.subplots_adjust(left=0.08, right=0.92, top=0.90, bottom=0.12)
         
         # Add a secondary axis for annotations
         self.ax2 = self.axes.twinx()
         self.ax2.set_visible(False)  # Initially hidden, only used for peak markers
+        
+        # Create custom color gradient
+        self.cmap = LinearSegmentedColormap.from_list(
+            'traffic_cmap', 
+            ['#10B981', '#FBBF24', '#EF4444']  # Green to yellow to red
+        )
+        
+        # Enable figure tight layout on resize
+        self.fig.tight_layout()
+        
+        # Connect resize event
+        self._resize_timer = QTimer()
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._handle_resize)
+        
+        # Enable wheel events to be passed to parent
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setMouseTracking(True)
     
-    def update_chart(self, events, time_range="Hourly", title="Footfall Analysis"):
+    def resizeEvent(self, event):
+        """Handle resize events for the chart."""
+        super().resizeEvent(event)
+        # Use a timer to avoid excessive redrawing during continuous resize
+        self._resize_timer.start(100)
+    
+    def _handle_resize(self):
+        """Adjust figure layout after resize."""
+        self.fig.tight_layout()
+        self.draw()
+    
+    def update_chart(self, events, time_range="Hourly", title="Visitor Traffic Analysis"):
         """
         Update chart showing people count over time.
         
@@ -665,7 +700,7 @@ class FootfallAnalysisChart(MplCanvas):
         self.ax2.clear()
         
         if not events:
-            self.axes.set_title("No Events to Display")
+            self.axes.set_title("No Events to Display", fontsize=14, fontweight='bold')
             self.draw()
             return
         
@@ -678,7 +713,7 @@ class FootfallAnalysisChart(MplCanvas):
                 person_events.append(event)
         
         if not person_events:
-            self.axes.set_title("No Person Data Available")
+            self.axes.set_title("No Visitor Data Available", fontsize=14, fontweight='bold')
             self.draw()
             return
         
@@ -728,101 +763,305 @@ class FootfallAnalysisChart(MplCanvas):
         time_keys = sorted(footfall_by_time.keys())
         footfall_counts = [footfall_by_time[k] for k in time_keys]
         
-        # Create a more visually appealing bar chart
-        bars = self.axes.bar(
+        if not footfall_counts:
+            self.axes.set_title("No Visitor Traffic Data Available", fontsize=14, fontweight='bold')
+            self.draw()
+            return
+        
+        # Calculate traffic level categories
+        max_count = max(footfall_counts) if footfall_counts else 0
+        traffic_levels = []
+        for count in footfall_counts:
+            if count > 0.7 * max_count:
+                traffic_levels.append('High')
+            elif count > 0.4 * max_count:
+                traffic_levels.append('Medium')
+            else:
+                traffic_levels.append('Low')
+                
+        # Create color mapping based on traffic level
+        color_map = {
+            'High': '#EF4444',     # Red
+            'Medium': '#F59E0B',   # Amber 
+            'Low': '#10B981'       # Green
+        }
+        point_colors = [color_map[level] for level in traffic_levels]
+        
+        # Create a more visually appealing line+marker chart instead of bars
+        line = self.axes.plot(
             time_keys,
             footfall_counts,
-            width=0.7,
-            color='#3B82F6',  # Blue
+            marker='o',
+            markersize=14,  # Increased from 10
+            linewidth=4,    # Increased from 3
+            color='#4F46E5',  # Indigo
             alpha=0.8,
+            zorder=10
+        )[0]
+        
+        # Add colored markers based on traffic level
+        scatter = self.axes.scatter(
+            time_keys,
+            footfall_counts,
+            s=180,  # Increased from 120
+            c=point_colors,  # Color by traffic level
+            alpha=0.9,
             edgecolor='white',
-            linewidth=1
+            linewidth=2,    # Increased from 1.5
+            zorder=20
         )
         
-        # Find peak times (local maxima)
-        peak_indices = []
-        for i in range(1, len(footfall_counts)-1):
-            if footfall_counts[i] > footfall_counts[i-1] and footfall_counts[i] > footfall_counts[i+1]:
-                peak_indices.append(i)
+        # Add a subtle area fill under the line for better visual impact
+        self.axes.fill_between(
+            time_keys, 
+            footfall_counts,
+            alpha=0.2,  # Increased from 0.15
+            color='#4F46E5',
+            zorder=5
+        )
         
-        # Additionally, check first and last elements
-        if len(footfall_counts) > 1:
-            if footfall_counts[0] > footfall_counts[1]:
-                peak_indices.append(0)
-            if footfall_counts[-1] > footfall_counts[-2]:
-                peak_indices.append(len(footfall_counts)-1)
+        # Find peak times (local maxima or global maximum)
+        if len(footfall_counts) >= 3:
+            peak_indices = []
+            for i in range(1, len(footfall_counts)-1):
+                if footfall_counts[i] > footfall_counts[i-1] and footfall_counts[i] > footfall_counts[i+1]:
+                    peak_indices.append(i)
+                    
+            # If no local maxima found, just use the global maximum
+            if not peak_indices:
+                peak_indices = [footfall_counts.index(max(footfall_counts))]
+        else:
+            # For very short sequences, just mark the maximum
+            peak_indices = [footfall_counts.index(max(footfall_counts))]
         
-        # Highlight peak times 
+        # Highlight peak times
         for idx in peak_indices:
-            bar = bars[idx]
-            bar.set_color('#10B981')  # Green for peak times
-            bar.set_edgecolor('white')
-            bar.set_linewidth(1.5)
+            x = time_keys[idx]
+            y = footfall_counts[idx]
             
-            # Add a "PEAK" annotation above the bar
-            height = bar.get_height()
-            self.axes.annotate('PEAK',
-                xy=(bar.get_x() + bar.get_width()/2, height),
-                xytext=(0, 12),  # 12 points vertical offset
+            # Add star marker for the peak
+            self.axes.scatter(
+                x, y,
+                marker='*',
+                s=340,  # Increased from 240
+                color='#EF4444',  # Red
+                edgecolor='white',
+                linewidth=2,  # Increased from 1.5
+                zorder=30
+            )
+            
+            # Add a "PEAK" annotation above the point
+            self.axes.annotate(
+                'PEAK',
+                xy=(x, y),
+                xytext=(0, 20),  # Increased from 15
                 textcoords="offset points",
-                ha='center', va='bottom',
-                fontsize=10,
-                color='#10B981',
+                ha='center',
+                va='bottom',
+                fontsize=14,  # Increased from 11
                 fontweight='bold',
-                bbox=dict(boxstyle="round,pad=0.3", fc='white', ec='#10B981', alpha=0.8))
+                color='#EF4444',
+                bbox=dict(
+                    boxstyle="round,pad=0.3",
+                    fc='white',
+                    ec='#EF4444',
+                    alpha=0.9
+                ),
+                arrowprops=dict(
+                    arrowstyle='-|>',
+                    color='#EF4444',
+                    shrinkA=5,
+                    shrinkB=5,
+                    lw=2  # Increased from 1.5
+                ),
+                zorder=40
+            )
         
-        # Add value labels on top of bars
-        for bar in bars:
-            height = bar.get_height()
-            if height > 0:  # Only add labels to bars with values
-                self.axes.text(
-                    bar.get_x() + bar.get_width()/2.,
-                    height + max(footfall_counts) * 0.02,
-                    f'{int(height)}',
-                    ha='center', 
+        # Add value labels on top of points
+        for i, (x, y) in enumerate(zip(time_keys, footfall_counts)):
+            # Only label points that are peaks or have significant values
+            if i in peak_indices or y > 0.5 * max_count:
+                self.axes.annotate(
+                    f'{int(y)}',
+                    xy=(x, y),
+                    xytext=(0, 15),  # Increased from 12
+                    textcoords="offset points",
+                    ha='center',
                     va='bottom',
+                    fontsize=12,  # Increased from 10
+                    fontweight='bold',
                     color='#1F2937',
-                    fontsize=10,
-                    fontweight='bold'
+                    bbox=dict(
+                        boxstyle="round,pad=0.3",  # Increased from 0.2
+                        fc='white',
+                        ec='#E5E7EB',
+                        alpha=0.9  # Increased from 0.8
+                    ),
+                    zorder=50
                 )
         
+        # Add average line
+        avg_footfall = sum(footfall_counts) / len(footfall_counts)
+        self.axes.axhline(
+            y=avg_footfall,
+            color='#6B7280',
+            linestyle='--',
+            linewidth=2,  # Increased from 1.5
+            alpha=0.7,
+            zorder=15
+        )
+        
+        # Add average label
+        self.axes.annotate(
+            f'Avg: {avg_footfall:.1f}',
+            xy=(time_keys[-1], avg_footfall),
+            xytext=(15, 0),  # Increased from 10
+            textcoords="offset points",
+            ha='left',
+            va='center',
+            fontsize=12,  # Increased from 10
+            fontweight='bold',
+            color='#6B7280',
+            bbox=dict(
+                boxstyle="round,pad=0.3",  # Increased from 0.2
+                fc='white',
+                ec='#E5E7EB',
+                alpha=0.9  # Increased from 0.8
+            ),
+            zorder=55
+        )
+        
+        # Add shaded regions for traffic level zones
+        if max_count > 0:
+            # High traffic threshold line (70% of max)
+            high_threshold = 0.7 * max_count
+            self.axes.axhspan(
+                high_threshold, max_count * 1.1,
+                alpha=0.05,
+                color='#EF4444',
+                zorder=1
+            )
+            
+            # Medium traffic threshold line (40% of max)
+            medium_threshold = 0.4 * max_count
+            self.axes.axhspan(
+                medium_threshold, high_threshold,
+                alpha=0.05,
+                color='#F59E0B',
+                zorder=1
+            )
+            
+            # Low traffic zone
+            self.axes.axhspan(
+                0, medium_threshold,
+                alpha=0.05,
+                color='#10B981',
+                zorder=1
+            )
+            
+            # Add subtle threshold lines
+            self.axes.axhline(
+                y=high_threshold,
+                color='#EF4444',
+                linestyle=':',
+                linewidth=1,
+                alpha=0.3,
+                zorder=2
+            )
+            
+            self.axes.axhline(
+                y=medium_threshold,
+                color='#F59E0B',
+                linestyle=':',
+                linewidth=1,
+                alpha=0.3,
+                zorder=2
+            )
+        
         # Add labels and title
-        self.axes.set_title(f"{title} ({time_range})", fontsize=14, fontweight='bold', color='#1F2937')
-        self.axes.set_xlabel("Time Period", color='#1F2937', fontsize=12)
-        self.axes.set_ylabel("Number of People", color='#1F2937', fontsize=12)
+        self.axes.set_title(f"{title} ({time_range})", fontsize=20, fontweight='bold', color='#1F2937')
+        self.axes.set_xlabel("Time Period", color='#4B5563', fontsize=16, fontweight='bold')
+        self.axes.set_ylabel("Number of Visitors", color='#4B5563', fontsize=16, fontweight='bold')
         
         # Rotate x labels if there are more than 6 time periods
         if len(time_keys) > 6:
-            plt.setp(self.axes.get_xticklabels(), rotation=45, ha='right', fontsize=10)
+            plt.setp(self.axes.get_xticklabels(), rotation=45, ha='right', fontsize=14)
         else:
-            plt.setp(self.axes.get_xticklabels(), fontsize=10)
+            plt.setp(self.axes.get_xticklabels(), fontsize=14)
         
-        plt.setp(self.axes.get_yticklabels(), fontsize=10)
+        plt.setp(self.axes.get_yticklabels(), fontsize=14)
         
         # Add grid lines for better readability
-        self.axes.grid(axis='y', linestyle='--', alpha=0.3)
+        self.axes.grid(axis='y', linestyle='--', alpha=0.3, linewidth=1.5)
         
         # Remove top and right spines
         self.axes.spines['top'].set_visible(False)
         self.axes.spines['right'].set_visible(False)
         
-        # Add summary statistics
+        # Add traffic level legend
+        legend_elements = [
+            Patch(facecolor='#10B981', edgecolor='white', alpha=0.7, label='Low Traffic'),
+            Patch(facecolor='#F59E0B', edgecolor='white', alpha=0.7, label='Medium Traffic'),
+            Patch(facecolor='#EF4444', edgecolor='white', alpha=0.7, label='High Traffic')
+        ]
+        
+        self.axes.legend(
+            handles=legend_elements,
+            loc='upper left',
+            ncol=3,
+            frameon=True,
+            facecolor='white',
+            edgecolor='#E5E7EB',
+            fontsize=12  # Increased from 9
+        )
+        
+        # Adjust y-axis to add some padding
+        y_max = max(footfall_counts) * 1.15 if footfall_counts else 10
+        self.axes.set_ylim(0, y_max)
+        
+        # Add summary insights in chart
         if footfall_counts:
-            avg_footfall = sum(footfall_counts) / len(footfall_counts)
             max_footfall = max(footfall_counts)
             max_time = time_keys[footfall_counts.index(max_footfall)]
             
-            stats_text = f"Peak Time: {max_time} ({max_footfall} people)\nAverage: {avg_footfall:.1f} people per period"
+            # Calculate percent change from average
+            percent_change = ((max_footfall - avg_footfall) / avg_footfall * 100) if avg_footfall > 0 else 0
+            
+            # Create dynamic insights based on the data
+            insight_points = [
+                f"Peak traffic at {max_time}: {max_footfall} visitors",
+                f"{percent_change:.1f}% higher than average during peak"
+            ]
+            
+            # Add more specific insights based on patterns
+            high_traffic_periods = [time_keys[i] for i, level in enumerate(traffic_levels) if level == 'High']
+            if high_traffic_periods:
+                if len(high_traffic_periods) > 1:
+                    insight_points.append(f"Multiple high traffic periods: {', '.join(high_traffic_periods[:3])}")
+                else:
+                    insight_points.append(f"Single high traffic period at {high_traffic_periods[0]}")
+            
+            # Create summary box
+            insights_text = "\n".join([f"• {point}" for point in insight_points])
             self.axes.text(
-                0.02, 0.97, stats_text,
+                0.02, 0.02, 
+                insights_text,
                 transform=self.axes.transAxes,
-                fontsize=10,
-                verticalalignment='top',
-                bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.8, edgecolor='#E5E7EB')
+                fontsize=12,  # Increased from 9
+                verticalalignment='bottom',
+                bbox=dict(
+                    boxstyle='round,pad=0.6',  # Increased from 0.5
+                    facecolor='white', 
+                    alpha=0.95,  # Increased from 0.9
+                    edgecolor='#E5E7EB'
+                ),
+                zorder=100
             )
         
-        # Adjust layout
+        # Adjust layout for better display
         self.fig.tight_layout()
+        
+        # Final draw
         self.draw()
 
 class AnalyticsDashboard(QWidget):
@@ -1250,6 +1489,75 @@ class AnalyticsDashboard(QWidget):
         footfall_layout.setContentsMargins(15, 15, 15, 15)
         footfall_layout.setSpacing(20)
         
+        # Create scroll area to contain all footfall content
+        footfall_scroll_area = QScrollArea()
+        footfall_scroll_area.setWidgetResizable(True)
+        footfall_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        footfall_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        footfall_scroll_area.setFrameShape(QFrame.NoFrame)
+        footfall_scroll_area.setFocusPolicy(Qt.StrongFocus)  # Allow keyboard focus
+        
+        # Custom keyboard navigation for scroll area
+        class EnhancedScrollArea(QScrollArea):
+            def keyPressEvent(self, event):
+                """Enhanced key navigation for scroll area."""
+                vbar = self.verticalScrollBar()
+                hbar = self.horizontalScrollBar()
+                
+                # Handle key navigation
+                if event.key() == Qt.Key_Up:
+                    vbar.setValue(vbar.value() - 30)  # Scroll up
+                elif event.key() == Qt.Key_Down:
+                    vbar.setValue(vbar.value() + 30)  # Scroll down
+                elif event.key() == Qt.Key_Left:
+                    hbar.setValue(hbar.value() - 30)  # Scroll left
+                elif event.key() == Qt.Key_Right:
+                    hbar.setValue(hbar.value() + 30)  # Scroll right
+                elif event.key() == Qt.Key_PageUp:
+                    vbar.setValue(vbar.value() - vbar.pageStep())  # Page up
+                elif event.key() == Qt.Key_PageDown:
+                    vbar.setValue(vbar.value() + vbar.pageStep())  # Page down
+                elif event.key() == Qt.Key_Home:
+                    vbar.setValue(vbar.minimum())  # Scroll to top
+                elif event.key() == Qt.Key_End:
+                    vbar.setValue(vbar.maximum())  # Scroll to bottom
+                else:
+                    super().keyPressEvent(event)
+        
+        # Replace standard scroll area with enhanced one
+        footfall_scroll_area = EnhancedScrollArea()
+        footfall_scroll_area.setWidgetResizable(True)
+        footfall_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        footfall_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        footfall_scroll_area.setFrameShape(QFrame.NoFrame)
+        footfall_scroll_area.setFocusPolicy(Qt.StrongFocus)  # Allow keyboard focus
+        
+        footfall_scroll_area.setStyleSheet("""
+            QScrollArea {
+                background-color: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background: #F3F4F6;
+                width: 14px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #9CA3AF;
+                min-height: 20px;
+                border-radius: 7px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+        
+        # Create a container widget to hold all the footfall content
+        footfall_container = QWidget()
+        footfall_container_layout = QVBoxLayout(footfall_container)
+        footfall_container_layout.setContentsMargins(0, 0, 0, 0)
+        footfall_container_layout.setSpacing(20)
+        
         # Controls section for footfall analysis
         controls_frame = QFrame()
         controls_frame.setStyleSheet("""
@@ -1285,6 +1593,12 @@ class AnalyticsDashboard(QWidget):
             }
             QComboBox:hover {
                 border-color: #9CA3AF;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #FFFFFF;
+                border: 1px solid #D1D5DB;
+                selection-background-color: #EFF6FF;
+                selection-color: #2563EB;
             }
         """)
         self.time_range_combo.currentIndexChanged.connect(self.update_footfall_chart)
@@ -1341,7 +1655,7 @@ class AnalyticsDashboard(QWidget):
         self.apply_btn.clicked.connect(self.update_footfall_chart)
         controls_layout.addWidget(self.apply_btn)
         
-        footfall_layout.addWidget(controls_frame)
+        footfall_container_layout.addWidget(controls_frame)
         
         # Footfall chart with increased height
         footfall_chart_frame = QFrame()
@@ -1349,27 +1663,51 @@ class AnalyticsDashboard(QWidget):
             background-color: #FFFFFF;
             border-radius: 8px;
             border: 1px solid #E4E7EB;
-            padding: 15px;
+            padding: 20px;
         """)
+        footfall_chart_frame.setMinimumHeight(750)  # Increased minimum height
         footfall_chart_layout = QVBoxLayout(footfall_chart_frame)
-        footfall_chart_layout.setContentsMargins(10, 15, 10, 10)
+        footfall_chart_layout.setContentsMargins(15, 20, 15, 20)  # Increased margins
         
         # Title
-        footfall_title = QLabel("People Traffic Analysis")
-        footfall_title.setStyleSheet("font-size: 18px; font-weight: 600; color: #111827; margin-bottom: 10px;")
+        footfall_title = QLabel("Visitor Traffic Analysis")
+        footfall_title.setStyleSheet("font-size: 22px; font-weight: 600; color: #111827; margin-bottom: 12px;")
         footfall_chart_layout.addWidget(footfall_title)
         
         # Description
-        footfall_desc = QLabel("Analyze when your location experiences the highest visitor traffic. Peaks are highlighted in green.")
-        footfall_desc.setStyleSheet("color: #6B7280; font-size: 14px; margin-bottom: 15px;")
+        footfall_desc = QLabel("Track visitor patterns over time with our enhanced visualization. Colors indicate traffic levels: green (low), amber (medium), and red (high). Star markers highlight peak periods.")
+        footfall_desc.setStyleSheet("color: #4B5563; font-size: 15px; margin-bottom: 20px; line-height: 1.4;")
         footfall_desc.setWordWrap(True)
         footfall_chart_layout.addWidget(footfall_desc)
         
         # The chart
         self.footfall_chart = FootfallAnalysisChart()
+        self.footfall_chart.setMinimumWidth(1000)  # Ensure chart has enough width
+        
+        # Install event filter on chart to allow scroll events to propagate to parent scroll area
+        class WheelEventFilter(QObject):
+            def eventFilter(self, obj, event):
+                # Check if it's a wheel event (type 31 = wheel event in Qt)
+                if event.type() == 31:  # 31 is the WheelEvent type in Qt
+                    # Find parent scroll area
+                    parent = obj.parent()
+                    while parent and not isinstance(parent, QScrollArea):
+                        parent = parent.parent()
+                    
+                    if parent:
+                        # Forward wheel event to the scroll area
+                        parent.wheelEvent(event)
+                        return True
+                        
+                return False
+        
+        # Create and install event filter
+        wheel_filter = WheelEventFilter(self.footfall_chart)
+        self.footfall_chart.installEventFilter(wheel_filter)
+        
         footfall_chart_layout.addWidget(self.footfall_chart)
         
-        footfall_layout.addWidget(footfall_chart_frame, 1)  # Give it a stretch factor of 1
+        footfall_container_layout.addWidget(footfall_chart_frame)
         
         # Add insights section
         insights_frame = QFrame()
@@ -1386,16 +1724,22 @@ class AnalyticsDashboard(QWidget):
         insights_layout.addWidget(insights_title)
         
         self.insights_content = QLabel(
-            "• Analyze when your foot traffic is highest to optimize staffing and operations\n"
-            "• Green bars indicate peak times with the highest visitor counts\n"
-            "• Compare different time periods to identify patterns and trends\n"
-            "• Use these insights for scheduling, marketing campaigns, and resource allocation"
+            "• Identify peak visitor times to optimize staff scheduling and store operations\n"
+            "• Traffic levels are color-coded: green (low), amber (medium), red (high)\n"
+            "• Star markers highlight peak traffic periods that require special attention\n"
+            "• Use this data for staffing, marketing campaigns, and resource optimization"
         )
         self.insights_content.setStyleSheet("color: #4B5563; font-size: 14px; line-height: 1.6;")
         self.insights_content.setWordWrap(True)
         insights_layout.addWidget(self.insights_content)
         
-        footfall_layout.addWidget(insights_frame)
+        footfall_container_layout.addWidget(insights_frame)
+        
+        # Set the container as the scroll area's widget
+        footfall_scroll_area.setWidget(footfall_container)
+        
+        # Add scroll area to the main footfall layout
+        footfall_layout.addWidget(footfall_scroll_area)
         
         # Add tab to widget
         self.tab_widget.addTab(footfall_tab, "Footfall Analysis")
@@ -1457,6 +1801,29 @@ class AnalyticsDashboard(QWidget):
     def switch_tab(self, index):
         """Switch between chart tabs."""
         self.tab_widget.setCurrentIndex(index)
+        
+        # If we're switching to the footfall tab, ensure scroll area is properly focused
+        if self.tab_widget.tabText(index) == "Footfall Analysis":
+            QTimer.singleShot(50, self._focus_footfall_scroll)
+    
+    def _focus_footfall_scroll(self):
+        """Ensure footfall scroll area is properly focused for keyboard scrolling."""
+        try:
+            # Find the scroll area in the footfall tab
+            footfall_tab = self.tab_widget.widget(self.tab_widget.currentIndex())
+            scroll_area = None
+            
+            # Find the first QScrollArea in the tab's children
+            for child in footfall_tab.findChildren(QScrollArea):
+                scroll_area = child
+                break
+                
+            if scroll_area:
+                # Ensure scroll area accepts focus and keyboard input
+                scroll_area.setFocusPolicy(Qt.StrongFocus)
+                scroll_area.setFocus()
+        except Exception as e:
+            print(f"Error focusing footfall scroll area: {e}")
     
     def set_events(self, events):
         """Set the events data and update the dashboard."""
@@ -1685,29 +2052,5 @@ class AnalyticsDashboard(QWidget):
                 f"• Peak traffic detected during {time_range.lower()} analysis\n"
                 f"• Consider scheduling staff rotations based on traffic patterns\n"
                 f"• {len(self.events)} total events analyzed in this dataset\n"
-                f"• Use these insights for scheduling, marketing campaigns, and resource allocation"
-            )
-
-    def update_dashboard(self):
-        """Update the entire dashboard with current data and filters."""
-        # Get filtered events based on current selections
-        filtered_events = self.get_filtered_events()
-        
-        # Update statistics
-        self.update_statistics(filtered_events)
-        
-        # Update charts in Overview tab
-        self.event_type_chart.update_chart(filtered_events)
-        self.timeline_chart.update_chart(filtered_events)
-        self.roi_activity_chart.update_chart(filtered_events)
-        self.event_roi_chart.update_chart(filtered_events)
-        
-        # Update advanced charts
-        self.heatmap_chart.update_chart(filtered_events)
-        self.dwell_chart.update_chart(filtered_events)
-        
-        # Update event table
-        self.update_event_table(filtered_events)
-        
-        # Update footfall chart
-        self.update_footfall_chart() 
+                f"• Use this data for staffing, marketing campaigns, and resource optimization"
+            ) 
