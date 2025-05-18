@@ -272,38 +272,6 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(20)
         
-        # Header section
-        header_frame = QFrame()
-        header_frame.setObjectName("header")
-        header_frame.setStyleSheet("""
-            #header {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #3B82F6, stop:1 #1E40AF);
-                border-radius: 12px;
-                padding: 20px;
-            }
-        """)
-        header_layout = QVBoxLayout(header_frame)
-        
-        # Header title and subtitle
-        title = QLabel("Welcome to Vision AI")
-        title.setStyleSheet("""
-            font-size: 32px;
-            font-weight: bold;
-            color: white;
-        """)
-        
-        subtitle = QLabel("Intelligent Surveillance for Business Security")
-        subtitle.setStyleSheet("""
-            font-size: 16px;
-            color: rgba(255, 255, 255, 0.9);
-            margin-top: 5px;
-        """)
-        
-        header_layout.addWidget(title)
-        header_layout.addWidget(subtitle)
-        layout.addWidget(header_frame)
-        
         # Cards container
         cards_widget = QWidget()
         cards_layout = QHBoxLayout(cards_widget)
@@ -315,10 +283,13 @@ class MainWindow(QMainWindow):
         video_card.setProperty("class", "card")
         video_card.setMinimumHeight(300)
         video_card_layout = QVBoxLayout(video_card)
+        video_card_layout.setContentsMargins(30, 30, 30, 30)
+        video_card_layout.setAlignment(Qt.AlignTop)
         
         # Card icon
         video_icon_label = QLabel()
         video_icon_label.setAlignment(Qt.AlignCenter)
+        video_icon_label.setFixedSize(60, 60)
         video_icon_label.setStyleSheet("""
             background-color: #EFF6FF;
             border-radius: 30px;
@@ -326,24 +297,42 @@ class MainWindow(QMainWindow):
             margin-bottom: 15px;
         """)
         # You can replace this with an actual icon later
-        video_icon = QLabel("🎬")
+        video_icon = QLabel("⬆️")
         video_icon.setStyleSheet("font-size: 32px; color: #3B82F6;")
         video_icon_layout = QVBoxLayout(video_icon_label)
+        video_icon_layout.setContentsMargins(0, 0, 0, 0)
         video_icon_layout.addWidget(video_icon)
         
         # Card content
         video_title = QLabel("Upload Video File")
-        video_title.setProperty("class", "card-title")
+        video_title.setStyleSheet("""
+            font-size: 18px;
+            font-weight: bold;
+            color: #1F2937;
+            margin-top: 10px;
+        """)
         
         video_desc = QLabel("Import a pre-recorded video file for analysis")
-        video_desc.setProperty("class", "card-subtitle")
+        video_desc.setStyleSheet("""
+            font-size: 14px;
+            color: #6B7280;
+            margin-top: 5px;
+            margin-bottom: 20px;
+        """)
         video_desc.setWordWrap(True)
         
         video_button = QPushButton("Select Video File")
-        video_button.setMinimumWidth(200)
+        video_button.setStyleSheet("""
+            background-color: #3B82F6;
+            color: white;
+            border-radius: 8px;
+            padding: 10px 15px;
+            font-weight: 600;
+        """)
+        video_button.setMinimumWidth(180)
         video_button.clicked.connect(self.select_video_file)
         
-        video_card_layout.addWidget(video_icon_label)
+        video_card_layout.addWidget(video_icon_label, 0, Qt.AlignLeft)
         video_card_layout.addWidget(video_title)
         video_card_layout.addWidget(video_desc)
         video_card_layout.addWidget(video_button)
@@ -354,10 +343,13 @@ class MainWindow(QMainWindow):
         camera_card.setProperty("class", "card")
         camera_card.setMinimumHeight(300)
         camera_card_layout = QVBoxLayout(camera_card)
+        camera_card_layout.setContentsMargins(30, 30, 30, 30)
+        camera_card_layout.setAlignment(Qt.AlignTop)
         
         # Card icon
         camera_icon_label = QLabel()
         camera_icon_label.setAlignment(Qt.AlignCenter)
+        camera_icon_label.setFixedSize(60, 60)
         camera_icon_label.setStyleSheet("""
             background-color: #ECFDF5;
             border-radius: 30px;
@@ -365,65 +357,106 @@ class MainWindow(QMainWindow):
             margin-bottom: 15px;
         """)
         # You can replace this with an actual icon later
-        camera_icon = QLabel("📹")
+        camera_icon = QLabel("📷")
         camera_icon.setStyleSheet("font-size: 32px; color: #10B981;")
         camera_icon_layout = QVBoxLayout(camera_icon_label)
+        camera_icon_layout.setContentsMargins(0, 0, 0, 0)
         camera_icon_layout.addWidget(camera_icon)
         
         # Card content
         camera_title = QLabel("Connect to Camera")
-        camera_title.setProperty("class", "card-title")
+        camera_title.setStyleSheet("""
+            font-size: 18px;
+            font-weight: bold;
+            color: #1F2937;
+            margin-top: 10px;
+        """)
         
         camera_desc = QLabel("Connect to a webcam or IP camera for live monitoring")
-        camera_desc.setProperty("class", "card-subtitle")
+        camera_desc.setStyleSheet("""
+            font-size: 14px;
+            color: #6B7280;
+            margin-top: 5px;
+            margin-bottom: 20px;
+        """)
         camera_desc.setWordWrap(True)
         
-        camera_button = QPushButton("Connect Camera")
-        camera_button.setMinimumWidth(200)
+        camera_button = QPushButton("Connect")
+        camera_button.setStyleSheet("""
+            background-color: #10B981;
+            color: white;
+            border-radius: 8px;
+            padding: 10px 15px;
+            font-weight: 600;
+        """)
+        camera_button.setMinimumWidth(120)
         camera_button.clicked.connect(self.connect_to_camera)
         
-        camera_card_layout.addWidget(camera_icon_label)
+        camera_card_layout.addWidget(camera_icon_label, 0, Qt.AlignLeft)
         camera_card_layout.addWidget(camera_title)
         camera_card_layout.addWidget(camera_desc)
         camera_card_layout.addWidget(camera_button)
+        camera_card_layout.addStretch()
         
         # RTSP stream card
         rtsp_card = QFrame()
         rtsp_card.setProperty("class", "card")
         rtsp_card.setMinimumHeight(300)
         rtsp_card_layout = QVBoxLayout(rtsp_card)
+        rtsp_card_layout.setContentsMargins(30, 30, 30, 30)
+        rtsp_card_layout.setAlignment(Qt.AlignTop)
         
         # Card icon
         rtsp_icon_label = QLabel()
         rtsp_icon_label.setAlignment(Qt.AlignCenter)
+        rtsp_icon_label.setFixedSize(60, 60)
         rtsp_icon_label.setStyleSheet("""
-            background-color: #FEF3F2;
+            background-color: #EEE7FF;
             border-radius: 30px;
             padding: 15px;
             margin-bottom: 15px;
         """)
         # You can replace this with an actual icon later
-        rtsp_icon = QLabel("🔄")
-        rtsp_icon.setStyleSheet("font-size: 32px; color: #F43F5E;")
+        rtsp_icon = QLabel("📡")
+        rtsp_icon.setStyleSheet("font-size: 32px; color: #8B5CF6;")
         rtsp_icon_layout = QVBoxLayout(rtsp_icon_label)
+        rtsp_icon_layout.setContentsMargins(0, 0, 0, 0)
         rtsp_icon_layout.addWidget(rtsp_icon)
         
         # Card content
         rtsp_title = QLabel("RTSP Stream")
-        rtsp_title.setProperty("class", "card-title")
+        rtsp_title.setStyleSheet("""
+            font-size: 18px;
+            font-weight: bold;
+            color: #1F2937;
+            margin-top: 10px;
+        """)
         
         rtsp_desc = QLabel("Connect to an RTSP stream from a network camera")
-        rtsp_desc.setProperty("class", "card-subtitle")
+        rtsp_desc.setStyleSheet("""
+            font-size: 14px;
+            color: #6B7280;
+            margin-top: 5px;
+            margin-bottom: 20px;
+        """)
         rtsp_desc.setWordWrap(True)
         
-        rtsp_button = QPushButton("Connect to RTSP")
-        rtsp_button.setMinimumWidth(200)
+        rtsp_button = QPushButton("Connect")
+        rtsp_button.setStyleSheet("""
+            background-color: #8B5CF6;
+            color: white;
+            border-radius: 8px;
+            padding: 10px 15px;
+            font-weight: 600;
+        """)
+        rtsp_button.setMinimumWidth(120)
         rtsp_button.clicked.connect(self.connect_to_rtsp)
         
-        rtsp_card_layout.addWidget(rtsp_icon_label)
+        rtsp_card_layout.addWidget(rtsp_icon_label, 0, Qt.AlignLeft)
         rtsp_card_layout.addWidget(rtsp_title)
         rtsp_card_layout.addWidget(rtsp_desc)
         rtsp_card_layout.addWidget(rtsp_button)
+        rtsp_card_layout.addStretch()
         
         # Add cards to layout
         cards_layout.addWidget(video_card)
@@ -448,51 +481,103 @@ class MainWindow(QMainWindow):
         
         # Feature 1
         feature1 = QVBoxLayout()
+        feature1_icon_container = QLabel()
+        feature1_icon_container.setFixedSize(60, 60)
+        feature1_icon_container.setStyleSheet("""
+            background-color: #FEF3C7;
+            border-radius: 30px;
+            padding: 15px;
+        """)
         feature1_icon = QLabel("🔍")
-        feature1_icon.setStyleSheet("font-size: 24px;")
+        feature1_icon.setStyleSheet("font-size: 24px; color: #D97706;")
+        feature1_icon_layout = QVBoxLayout(feature1_icon_container)
+        feature1_icon_layout.setContentsMargins(0, 0, 0, 0)
+        feature1_icon_layout.addWidget(feature1_icon)
+        
         feature1_title = QLabel("Object Detection")
-        feature1_title.setStyleSheet("font-weight: bold; font-size: 16px;")
-        feature1_desc = QLabel("Real-time detection of people, objects, and activities")
+        feature1_title.setStyleSheet("font-weight: bold; font-size: 16px; margin-top: 10px;")
+        feature1_desc = QLabel("Real-time detection of people, objects, and activities with high accuracy")
         feature1_desc.setWordWrap(True)
-        feature1.addWidget(feature1_icon)
+        feature1_desc.setStyleSheet("color: #6B7280; font-size: 14px;")
+        feature1.addWidget(feature1_icon_container, 0, Qt.AlignLeft)
         feature1.addWidget(feature1_title)
         feature1.addWidget(feature1_desc)
+        feature1.addStretch()
         
         # Feature 2
         feature2 = QVBoxLayout()
+        feature2_icon_container = QLabel()
+        feature2_icon_container.setFixedSize(60, 60)
+        feature2_icon_container.setStyleSheet("""
+            background-color: #FEE2E2;
+            border-radius: 30px;
+            padding: 15px;
+        """)
         feature2_icon = QLabel("🎯")
-        feature2_icon.setStyleSheet("font-size: 24px;")
+        feature2_icon.setStyleSheet("font-size: 24px; color: #EF4444;")
+        feature2_icon_layout = QVBoxLayout(feature2_icon_container)
+        feature2_icon_layout.setContentsMargins(0, 0, 0, 0)
+        feature2_icon_layout.addWidget(feature2_icon)
+        
         feature2_title = QLabel("Region Tracking")
-        feature2_title.setStyleSheet("font-weight: bold; font-size: 16px;")
-        feature2_desc = QLabel("Define custom areas of interest for targeted monitoring")
+        feature2_title.setStyleSheet("font-weight: bold; font-size: 16px; margin-top: 10px;")
+        feature2_desc = QLabel("Define custom areas of interest for targeted monitoring and alerts")
         feature2_desc.setWordWrap(True)
-        feature2.addWidget(feature2_icon)
+        feature2_desc.setStyleSheet("color: #6B7280; font-size: 14px;")
+        feature2.addWidget(feature2_icon_container, 0, Qt.AlignLeft)
         feature2.addWidget(feature2_title)
         feature2.addWidget(feature2_desc)
+        feature2.addStretch()
         
         # Feature 3
         feature3 = QVBoxLayout()
+        feature3_icon_container = QLabel()
+        feature3_icon_container.setFixedSize(60, 60)
+        feature3_icon_container.setStyleSheet("""
+            background-color: #DBEAFE;
+            border-radius: 30px;
+            padding: 15px;
+        """)
         feature3_icon = QLabel("🧠")
-        feature3_icon.setStyleSheet("font-size: 24px;")
+        feature3_icon.setStyleSheet("font-size: 24px; color: #3B82F6;")
+        feature3_icon_layout = QVBoxLayout(feature3_icon_container)
+        feature3_icon_layout.setContentsMargins(0, 0, 0, 0)
+        feature3_icon_layout.addWidget(feature3_icon)
+        
         feature3_title = QLabel("AI Reasoning")
-        feature3_title.setStyleSheet("font-weight: bold; font-size: 16px;")
-        feature3_desc = QLabel("Smart event detection and anomaly identification")
+        feature3_title.setStyleSheet("font-weight: bold; font-size: 16px; margin-top: 10px;")
+        feature3_desc = QLabel("Smart event detection and anomaly identification using advanced algorithms")
         feature3_desc.setWordWrap(True)
-        feature3.addWidget(feature3_icon)
+        feature3_desc.setStyleSheet("color: #6B7280; font-size: 14px;")
+        feature3.addWidget(feature3_icon_container, 0, Qt.AlignLeft)
         feature3.addWidget(feature3_title)
         feature3.addWidget(feature3_desc)
+        feature3.addStretch()
         
         # Feature 4
         feature4 = QVBoxLayout()
+        feature4_icon_container = QLabel()
+        feature4_icon_container.setFixedSize(60, 60)
+        feature4_icon_container.setStyleSheet("""
+            background-color: #D1FAE5;
+            border-radius: 30px;
+            padding: 15px;
+        """)
         feature4_icon = QLabel("📊")
-        feature4_icon.setStyleSheet("font-size: 24px;")
+        feature4_icon.setStyleSheet("font-size: 24px; color: #10B981;")
+        feature4_icon_layout = QVBoxLayout(feature4_icon_container)
+        feature4_icon_layout.setContentsMargins(0, 0, 0, 0)
+        feature4_icon_layout.addWidget(feature4_icon)
+        
         feature4_title = QLabel("Analytics")
-        feature4_title.setStyleSheet("font-weight: bold; font-size: 16px;")
-        feature4_desc = QLabel("Comprehensive data visualization and reporting")
+        feature4_title.setStyleSheet("font-weight: bold; font-size: 16px; margin-top: 10px;")
+        feature4_desc = QLabel("Comprehensive data visualization and reporting for actionable insights")
         feature4_desc.setWordWrap(True)
-        feature4.addWidget(feature4_icon)
+        feature4_desc.setStyleSheet("color: #6B7280; font-size: 14px;")
+        feature4.addWidget(feature4_icon_container, 0, Qt.AlignLeft)
         feature4.addWidget(feature4_title)
         feature4.addWidget(feature4_desc)
+        feature4.addStretch()
         
         features_grid.addLayout(feature1)
         features_grid.addLayout(feature2)

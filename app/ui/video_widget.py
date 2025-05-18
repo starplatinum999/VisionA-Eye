@@ -99,6 +99,38 @@ class VideoWidget(QWidget):
         
         self.layout.addWidget(info_panel)
         
+        # Video seek slider
+        self.seek_slider = QSlider(Qt.Horizontal)
+        self.seek_slider.setRange(0, 100)
+        self.seek_slider.setValue(0)
+        self.seek_slider.setEnabled(False)
+        self.seek_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #E5E7EB;
+                height: 8px;
+                background: #F9FAFB;
+                margin: 2px 0;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #3B82F6;
+                border: 1px solid #2563EB;
+                width: 18px;
+                margin: -6px 0;
+                border-radius: 9px;
+            }
+            QSlider::add-page:horizontal {
+                background: #E5E7EB;
+                border-radius: 4px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #93C5FD;
+                border-radius: 4px;
+            }
+        """)
+        self.seek_slider.valueChanged.connect(self.seek_video)
+        self.layout.addWidget(self.seek_slider)
+        
         # Progress bar for video playback
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -136,6 +168,60 @@ class VideoWidget(QWidget):
         self.controls_layout = QHBoxLayout(controls_container)
         self.controls_layout.setContentsMargins(10, 10, 10, 10)
         self.controls_layout.setSpacing(15)
+        
+        # Rewind button
+        self.rewind_button = QPushButton("⏪ Rewind")
+        self.rewind_button.setStyleSheet("""
+            QPushButton {
+                background-color: #6B7280;
+                color: white;
+                border-radius: 8px;
+                padding: 12px 24px;
+                font-weight: 600;
+                font-size: 14px;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background-color: #4B5563;
+            }
+            QPushButton:pressed {
+                background-color: #374151;
+            }
+            QPushButton:disabled {
+                background-color: #D1D5DB;
+                color: #9CA3AF;
+            }
+        """)
+        self.rewind_button.clicked.connect(self.rewind_video)
+        self.rewind_button.setEnabled(False)
+        self.controls_layout.addWidget(self.rewind_button)
+        
+        # Step back button
+        self.step_back_button = QPushButton("⏮️ Step Back")
+        self.step_back_button.setStyleSheet("""
+            QPushButton {
+                background-color: #6366F1;
+                color: white;
+                border-radius: 8px;
+                padding: 12px 24px;
+                font-weight: 600;
+                font-size: 14px;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background-color: #4F46E5;
+            }
+            QPushButton:pressed {
+                background-color: #4338CA;
+            }
+            QPushButton:disabled {
+                background-color: #D1D5DB;
+                color: #9CA3AF;
+            }
+        """)
+        self.step_back_button.clicked.connect(self.step_back)
+        self.step_back_button.setEnabled(False)
+        self.controls_layout.addWidget(self.step_back_button)
         
         # Play/pause button with gradient styling
         self.play_button = QPushButton("Start Processing")
@@ -211,33 +297,40 @@ class VideoWidget(QWidget):
         self.snapshot_button.clicked.connect(self.take_snapshot)
         self.controls_layout.addWidget(self.snapshot_button)
         
-        # Add controls to main layout
         self.layout.addWidget(controls_container)
         
-        # Initialize video processing components
-        self.detector = YOLODetector()
-        self.tracker = DeepSORTTracker()
-        self.roi_areas = {}
-        self.roi_colors = {}
+        # Initialize variables
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.process_frame)
+        self.timer.setInterval(30)  # ~30fps
         
-        # Video state variables
         self.video_path = None
-        self.is_camera = False
         self.cap = None
+        self.is_playing = False
+        self.is_camera = False
+        self.current_frame = None
         self.frame_count = 0
         self.total_frames = 0
-        self.fps = 0
-        self.is_playing = False
-        self.current_frame = None
+        self.fps = 25.0
         self.base_time = datetime.now()
         self.detection_count = 0
         
-        # Tracking state
+        # For backward functionality
+        self.frame_buffer = []
+        self.buffer_size = 30  # Buffer size for backward playback
+        self.buffering_active = False
+        self.buffered_frames = {}  # Dictionary to store buffered frames by position
+        
+        # ROI data
+        self.roi_areas = {}
+        self.roi_colors = {}
+        
+        # Track data
         self.tracks = {}
         
-        # Video playback timer
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.process_frame)
+        # Initialize detector and tracker
+        self.detector = YOLODetector()
+        self.tracker = DeepSORTTracker()
     
     def take_snapshot(self):
         """Save the current frame as an image file."""
@@ -264,89 +357,73 @@ class VideoWidget(QWidget):
         """)
         
     def load_video(self, video_path, is_camera=False):
-        """Load a video file or camera feed."""
+        """Load video file or camera stream."""
+        self.stop_video()
+        
         self.video_path = video_path
         self.is_camera = is_camera
         
-        # Print diagnostic info
-        print(f"Attempting to open video source: {video_path}")
-        print(f"Is camera/stream: {is_camera}")
-        
-        # Open video capture
-        if is_camera and video_path.isdigit():
-            # For numeric camera indices (0, 1, 2, etc.)
-            self.cap = cv2.VideoCapture(int(video_path))
-        else:
-            # For video files and RTSP URLs
-            # Set RTSP transport protocol for better reliability
-            if video_path.startswith('rtsp://'):
-                print(f"Connecting to RTSP stream: {video_path}")
-                # Configure RTSP transport protocol
-                cv2.setUseOptimized(True)
-                
-                # Attempt with TCP transport first (more reliable)
-                self.cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
-                self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'H264'))
-                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1024)  # Increase buffer size
-                
-                # Check if connection was successful
-                if not self.cap.isOpened():
-                    print("Failed to connect with default settings, trying alternative settings...")
-                    # Try with UDP transport as fallback
-                    self.cap.release()
-                    self.cap = cv2.VideoCapture(video_path)
-            else:
-                self.cap = cv2.VideoCapture(video_path)
+        try:
+            self.cap = cv2.VideoCapture(video_path)
             
-        if not self.cap.isOpened():
-            error_msg = f"Cannot open video source: {video_path}"
-            print(error_msg)
-            if video_path.startswith('rtsp://'):
-                print("RTSP connection troubleshooting:")
-                print("1. Verify the URL is correct and the stream is active")
-                print("2. Check network connectivity")
-                print("3. Verify if authentication is required")
-                print("4. Make sure required codecs are installed")
-            raise ValueError(error_msg)
-        
-        print(f"Successfully opened video source: {video_path}")
-        
-        # Get video properties
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30
-        print(f"Video FPS: {self.fps}")
-        
-        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        print(f"Total frames: {self.total_frames}")
-        
-        # Read first frame
-        print("Attempting to read first frame...")
-        ret, frame = self.cap.read()
-        if ret:
-            print("First frame read successfully")
-            self.current_frame = frame
+            if not self.cap.isOpened():
+                raise ValueError(f"Could not open video source: {video_path}")
+            
+            # Get video properties
+            self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+            if self.fps <= 0:
+                self.fps = 25.0  # Default FPS if not available
+            
+            if not is_camera:
+                self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                # Enable seek slider for videos
+                self.seek_slider.setRange(0, self.total_frames)
+                self.seek_slider.setEnabled(True)
+                self.rewind_button.setEnabled(True)
+                self.step_back_button.setEnabled(True)
+                
+                # Start frame buffering for backward playback
+                self.buffering_active = True
+                self.buffered_frames = {}
+            else:
+                self.total_frames = 0
+                self.seek_slider.setEnabled(False)
+                self.rewind_button.setEnabled(False)
+                self.step_back_button.setEnabled(False)
+                self.buffering_active = False
+            
+            # Reset frame count
+            self.frame_count = 0
+            
+            # Reset base time
+            self.base_time = datetime.now()
+            
+            # Get first frame
+            ret, frame = self.cap.read()
+            if not ret:
+                raise ValueError("Could not read initial frame")
+            
+            # Display first frame
             self.display_frame(frame)
             
-            # Update frame counter
-            self.frame_counter.setText(f"Frame: 1 / {self.total_frames if self.total_frames > 0 else 'Live'}")
+            # Store current frame
+            self.current_frame = frame
             
-            # Update progress bar for video files
-            if self.total_frames > 0:
-                self.progress_bar.setValue(0)
-            else:
-                # Hide progress bar for live feeds
-                self.progress_bar.setVisible(False)
-        else:
-            print("Failed to read first frame")
-            raise ValueError("Failed to read first frame from video source")
+            # Clear track data
+            self.tracks = {}
+            
+            # Reset progress
+            self.progress_bar.setValue(0)
+            
+            # Update frame counter
+            self.frame_counter.setText(f"Frame: {self.frame_count} / {self.total_frames if self.total_frames > 0 else 'Live'}")
+            
+            # Update timestamp
+            self.timestamp_label.setText(f"Time: {self.base_time.strftime('%H:%M:%S')}")
         
-        # Reset state
-        self.frame_count = 0
-        self.tracks = {}
-        self.base_time = datetime.now()
-        self.detection_count = 0
-        
-        # Set timer interval based on FPS
-        self.timer.setInterval(int(1000 / self.fps))
+        except Exception as e:
+            print(f"Error loading video: {e}")
+            return False
         
         # Update UI
         self.play_button.setEnabled(True)
@@ -413,6 +490,16 @@ class VideoWidget(QWidget):
         # Update frame count
         self.frame_count += 1
         
+        # Buffer this frame for backward playback if enabled
+        if self.buffering_active and not self.is_camera:
+            self.buffered_frames[self.frame_count] = frame.copy()
+            
+            # Keep buffer size manageable by removing old frames
+            keys = sorted(list(self.buffered_frames.keys()))
+            if len(keys) > self.buffer_size:
+                oldest_key = keys[0]
+                del self.buffered_frames[oldest_key]
+        
         # Generate timestamp based on frame count and FPS
         seconds = self.frame_count / self.fps
         timestamp = self.base_time + timedelta(seconds=seconds)
@@ -446,6 +533,11 @@ class VideoWidget(QWidget):
             if self.total_frames > 0:
                 progress = int((self.frame_count / self.total_frames) * 100)
                 self.progress_bar.setValue(progress)
+                
+                # Update slider position (without triggering valueChanged)
+                self.seek_slider.blockSignals(True)
+                self.seek_slider.setValue(self.frame_count)
+                self.seek_slider.blockSignals(False)
             
             # Update frame counter
             self.frame_counter.setText(f"Frame: {self.frame_count} / {self.total_frames if self.total_frames > 0 else 'Live'}")
@@ -625,4 +717,116 @@ class VideoWidget(QWidget):
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
         
         # Display the annotated frame
-        self.display_frame(annotated_frame) 
+        self.display_frame(annotated_frame)
+    
+    def step_back(self):
+        """Step back one frame in the video."""
+        if self.is_camera or not self.cap or not self.cap.isOpened():
+            return
+        
+        # Stop playback
+        was_playing = self.is_playing
+        if self.is_playing:
+            self.toggle_play()
+        
+        # Calculate target frame (current - 2 because we just processed current - 1)
+        target_frame = max(0, self.frame_count - 2)
+        
+        # Check if we have this frame in buffer
+        if target_frame in self.buffered_frames:
+            # Use buffered frame directly
+            frame = self.buffered_frames[target_frame]
+            self.frame_count = target_frame
+            
+            # Generate timestamp
+            seconds = self.frame_count / self.fps
+            timestamp = self.base_time + timedelta(seconds=seconds)
+            
+            # Process and display frame
+            detections = self.detector.detect(frame)
+            tracks_updated = self.tracker.update(frame, detections)
+            processed_frame = self.draw_annotations(frame.copy(), tracks_updated, timestamp)
+            self.display_frame_with_annotations(processed_frame)
+            
+            # Update counters and slider
+            self.detection_count = len(detections)
+            self.detection_counter.setText(f"Detections: {self.detection_count}")
+            self.frame_counter.setText(f"Frame: {self.frame_count} / {self.total_frames}")
+            self.timestamp_label.setText(f"Time: {timestamp.strftime('%H:%M:%S')}")
+            
+            # Update slider
+            self.seek_slider.blockSignals(True)
+            self.seek_slider.setValue(self.frame_count)
+            self.seek_slider.blockSignals(False)
+            
+            # Store current frame
+            self.current_frame = frame
+        else:
+            # Need to seek in the video
+            self.seek_video(target_frame)
+            
+        # Resume playback if it was playing
+        if was_playing:
+            self.toggle_play()
+
+    def rewind_video(self):
+        """Rewind video to beginning."""
+        if self.is_camera or not self.cap or not self.cap.isOpened():
+            return
+        
+        # Stop playback
+        was_playing = self.is_playing
+        if self.is_playing:
+            self.toggle_play()
+        
+        # Seek to the beginning of the video
+        self.seek_video(0)
+        
+        # Resume playback if it was playing
+        if was_playing:
+            self.toggle_play()
+
+    def seek_video(self, position):
+        """Seek to a specific position in the video."""
+        if self.is_camera or not self.cap or not self.cap.isOpened():
+            return
+        
+        # Ensure position is an integer
+        position = int(position)
+        
+        # Clamp position to valid range
+        position = max(0, min(position, self.total_frames))
+        
+        # Set position
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, position)
+        
+        # Update frame count
+        self.frame_count = position
+        
+        # Read and display the frame at the seeked position
+        ret, frame = self.cap.read()
+        if ret:
+            # Generate timestamp
+            seconds = self.frame_count / self.fps
+            timestamp = self.base_time + timedelta(seconds=seconds)
+            
+            # Process and display frame
+            detections = self.detector.detect(frame)
+            tracks_updated = self.tracker.update(frame, detections)
+            processed_frame = self.draw_annotations(frame.copy(), tracks_updated, timestamp)
+            self.display_frame_with_annotations(processed_frame)
+            
+            # Update counters
+            self.detection_count = len(detections)
+            self.detection_counter.setText(f"Detections: {self.detection_count}")
+            self.frame_counter.setText(f"Frame: {self.frame_count} / {self.total_frames}")
+            self.timestamp_label.setText(f"Time: {timestamp.strftime('%H:%M:%S')}")
+            
+            # Update progress bar
+            progress = int((position / self.total_frames) * 100)
+            self.progress_bar.setValue(progress)
+            
+            # Store current frame
+            self.current_frame = frame
+        else:
+            print("Error seeking to frame") 

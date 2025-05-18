@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QLabel, 
     QListWidget, QListWidgetItem, QHBoxLayout, 
-    QFrame, QPushButton, QSplitter
+    QFrame, QPushButton, QSplitter, QComboBox
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QImage, QPixmap, QFont, QColor
@@ -97,6 +97,54 @@ class EventLogger(QWidget):
         header.setStyleSheet("color: #1F2937; background-color: #E4E7EB; padding: 8px; border-radius: 5px;")
         self.layout.addWidget(header)
         
+        # Filter controls container
+        filter_container = QWidget()
+        filter_layout = QHBoxLayout()
+        filter_container.setLayout(filter_layout)
+        filter_container.setStyleSheet("background-color: #E4E7EB; padding: 5px; border-radius: 5px; margin-top: 5px;")
+        
+        # Filter label
+        filter_label = QLabel("Filter by event type:")
+        filter_label.setStyleSheet("color: #374151; background-color: rgba(0,0,0,0);")
+        filter_layout.addWidget(filter_label)
+        
+        # Event type filter dropdown
+        self.filter_combo = QComboBox()
+        self.filter_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #FFFFFF;
+                border: 1px solid #D1D5DB;
+                border-radius: 4px;
+                padding: 5px;
+                color: #1F2937;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 24px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: white;
+                border: 1px solid #D1D5DB;
+                selection-background-color: #3B82F6;
+                selection-color: white;
+            }
+        """)
+        
+        # Add filter options
+        self.filter_combo.addItem("All Events")
+        self.filter_combo.addItem("ROI Transition")
+        self.filter_combo.addItem("ROI Exit")
+        self.filter_combo.addItem("Person at Shelf")
+        self.filter_combo.addItem("Item Pickup")
+        self.filter_combo.addItem("Potential Theft")
+        self.filter_combo.addItem("Long Dwell Time")
+        self.filter_combo.currentIndexChanged.connect(self.apply_filter)
+        
+        filter_layout.addWidget(self.filter_combo)
+        filter_layout.setStretchFactor(self.filter_combo, 2)
+        
+        self.layout.addWidget(filter_container)
+        
         # Event count label
         self.event_count_label = QLabel("Events: 0")
         self.event_count_label.setStyleSheet("color: #6B7280; padding: 5px;")
@@ -165,27 +213,49 @@ class EventLogger(QWidget):
         
         # Initialize event list
         self.events = []
+        self.current_filter = "All Events"
     
     def add_event(self, event):
         """Add a new event to the log."""
         self.events.append(event)
         
-        # Create a custom list item
-        item = QListWidgetItem()
-        event_widget = EventListItem(event)
+        # Apply current filter when adding new events
+        self.apply_filter()
+    
+    def apply_filter(self):
+        """Filter events based on the selected event type."""
+        # Get current filter
+        self.current_filter = self.filter_combo.currentText()
         
-        # Set appropriate size for the item
-        item.setSizeHint(QSize(self.event_list.width() - 30, 110))
+        # Clear current list
+        self.event_list.clear()
         
-        # Add to list
-        self.event_list.addItem(item)
-        self.event_list.setItemWidget(item, event_widget)
+        # Count filtered events
+        filtered_count = 0
         
-        # Scroll to bottom to show newest event
+        # Add events matching the filter
+        for event in self.events:
+            if self.current_filter == "All Events" or event['type'] == self.current_filter:
+                # Create a custom list item
+                item = QListWidgetItem()
+                event_widget = EventListItem(event)
+                
+                # Set appropriate size for the item
+                item.setSizeHint(QSize(self.event_list.width() - 30, 110))
+                
+                # Add to list
+                self.event_list.addItem(item)
+                self.event_list.setItemWidget(item, event_widget)
+                filtered_count += 1
+        
+        # Scroll to bottom
         self.event_list.scrollToBottom()
         
         # Update event count
-        self.event_count_label.setText(f"Events: {len(self.events)}")
+        if self.current_filter == "All Events":
+            self.event_count_label.setText(f"Events: {len(self.events)}")
+        else:
+            self.event_count_label.setText(f"Events: {filtered_count} of {len(self.events)} (filtered)")
     
     def clear_events(self):
         """Clear all events from the log."""
@@ -216,6 +286,11 @@ class EventLogger(QWidget):
             return
             
         try:
+            # Filter events based on current filter
+            filtered_events = self.events
+            if self.current_filter != "All Events":
+                filtered_events = [event for event in self.events if event['type'] == self.current_filter]
+            
             if selected_filter == "CSV Files (*.csv)":
                 # Ensure file has .csv extension
                 if not file_path.lower().endswith('.csv'):
@@ -226,7 +301,7 @@ class EventLogger(QWidget):
                     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                     writer.writeheader()
                     
-                    for event in self.events:
+                    for event in filtered_events:
                         # Extract only serializable fields
                         event_data = {
                             'type': event.get('type', ''),
@@ -243,23 +318,24 @@ class EventLogger(QWidget):
                     
                 # Create serializable version of events (without thumbnails)
                 serializable_events = []
-                for event in self.events:
+                for event in filtered_events:
                     event_copy = event.copy()
                     if 'thumbnail' in event_copy:
                         del event_copy['thumbnail']
                     serializable_events.append(event_copy)
-                    
+                
                 with open(file_path, 'w') as jsonfile:
-                    json.dump(serializable_events, jsonfile, indent=2)
+                    json.dump(serializable_events, jsonfile, indent=4)
                     
-            # Show success message
+            # Show success
             from PySide6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Export Successful", f"Events exported to {file_path}")
+            QMessageBox.information(self, "Export Successful", 
+                                   f"Events successfully exported to {os.path.basename(file_path)}")
                 
         except Exception as e:
             from PySide6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Export Error", f"Failed to export events: {str(e)}")
+            QMessageBox.critical(self, "Export Error", f"Error exporting events: {str(e)}")
     
     def get_events(self):
-        """Return the current list of events."""
+        """Return all events"""
         return self.events 

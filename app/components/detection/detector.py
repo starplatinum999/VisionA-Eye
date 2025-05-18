@@ -29,8 +29,27 @@ class YOLODetector:
         
         # Load YOLOv8 model
         try:
+            # Temporarily patch ultralytics torch_safe_load to use weights_only=False
+            from ultralytics.nn.tasks import torch_safe_load
+            
+            # Save the original function
+            original_torch_safe_load = torch_safe_load
+            
+            # Create a patched version
+            def patched_torch_safe_load(file):
+                return torch.load(file, map_location='cpu', weights_only=False), file
+            
+            # Apply the patch
+            from ultralytics.nn import tasks
+            tasks.torch_safe_load = patched_torch_safe_load
+            
+            # Load the model
             self.model = YOLO(self.model_path)
             print(f"YOLOv8 model loaded from {self.model_path}")
+            
+            # Restore the original function
+            tasks.torch_safe_load = original_torch_safe_load
+            
         except Exception as e:
             print(f"Error loading YOLOv8 model: {e}")
             raise
