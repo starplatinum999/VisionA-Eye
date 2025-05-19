@@ -13,6 +13,7 @@ from app.ui.video_widget import VideoWidget
 from app.ui.roi_widget import ROIWidget
 from app.ui.event_logger import EventLogger
 from app.ui.analytics_dashboard import AnalyticsDashboard
+from app.components.detection.detector_factory import DetectorFactory
 
 class MainWindow(QMainWindow):
     """Main window for the Vision AI desktop application."""
@@ -34,6 +35,7 @@ class MainWindow(QMainWindow):
         self.video_path = None
         self.roi_areas = {}
         self.roi_colors = {}
+        self.selected_detector_type = "theft_detector"  # Default detector type
         
         # Create tab widget (similar to Streamlit tabs)
         self.tabs = QTabWidget()
@@ -272,7 +274,37 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(20)
         
-        # Cards container
+        # Detector selection header
+        detector_header = QLabel("Select Detector Type")
+        detector_header.setStyleSheet("""
+            font-size: 20px;
+            font-weight: bold;
+            color: #1F2937;
+            margin-bottom: 10px;
+        """)
+        layout.addWidget(detector_header)
+        
+        # Detector selection cards container
+        detector_cards_widget = QWidget()
+        detector_cards_layout = QHBoxLayout(detector_cards_widget)
+        detector_cards_layout.setSpacing(20)
+        
+        # Get detector types
+        detector_types = [
+            {"id": "theft_detector", "name": "Theft Detector", "icon": "🚨", "color": "#EF4444", "bg_color": "#FEE2E2"},
+            {"id": "footfall_detector", "name": "Footfall Detector", "icon": "👣", "color": "#3B82F6", "bg_color": "#DBEAFE"},
+            {"id": "shelf_monitor_detector", "name": "Shelf Monitor", "icon": "🛒", "color": "#10B981", "bg_color": "#D1FAE5"},
+            {"id": "unauthorized_area_detector", "name": "Unauthorized Area Detector", "icon": "⛔", "color": "#F59E0B", "bg_color": "#FEF3C7"}
+        ]
+        
+        # Create a card for each detector
+        for detector in detector_types:
+            detector_card = self.create_detector_card(detector)
+            detector_cards_layout.addWidget(detector_card)
+            
+        layout.addWidget(detector_cards_widget)
+        
+        # Cards container for video source
         cards_widget = QWidget()
         cards_layout = QHBoxLayout(cards_widget)
         cards_layout.setSpacing(20)
@@ -590,39 +622,97 @@ class MainWindow(QMainWindow):
         layout.addWidget(features_frame)
         layout.addStretch()
     
-    def setup_roi_tab(self):
-        """Setup the ROI configuration tab."""
-        self.roi_widget = ROIWidget()
+    def create_detector_card(self, detector_info):
+        """Create a card for detector selection."""
+        # Get detector info
+        detector_id = detector_info["id"]
+        detector_name = detector_info["name"]
+        detector_icon = detector_info["icon"]
+        detector_color = detector_info["color"]
+        detector_bg_color = detector_info["bg_color"]
+        detector_description = DetectorFactory.get_detector_info(detector_id).get("description", "")
         
-        # Connect signals
-        self.roi_widget.roi_updated.connect(self.update_roi_data)
+        # Create card
+        detector_card = QFrame()
+        detector_card.setProperty("detectorId", detector_id)
+        detector_card.setProperty("class", "card")
+        detector_card.setMinimumHeight(150)
+        detector_card_layout = QVBoxLayout(detector_card)
+        detector_card_layout.setContentsMargins(15, 15, 15, 15)
         
-        self.tabs.addTab(self.roi_widget, "ROI Configuration")
+        # Set card style based on whether this detector is selected
+        if detector_id == self.selected_detector_type:
+            detector_card.setStyleSheet(f"""
+                QFrame.card {{
+                    background-color: {detector_bg_color};
+                    border: 2px solid {detector_color};
+                    border-radius: 8px;
+                    padding: 15px;
+                }}
+            """)
+        else:
+            detector_card.setStyleSheet("""
+                QFrame.card {
+                    background-color: white;
+                    border: 1px solid #E4E7EB;
+                    border-radius: 8px;
+                    padding: 15px;
+                }
+                QFrame.card:hover {
+                    border-color: #93C5FD;
+                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                }
+            """)
+        
+        # Card icon
+        detector_icon_label = QLabel(detector_icon)
+        detector_icon_label.setStyleSheet(f"""
+            font-size: 32px;
+            color: {detector_color};
+        """)
+        detector_card_layout.addWidget(detector_icon_label, 0, Qt.AlignHCenter)
+        
+        # Card title
+        detector_title = QLabel(detector_name)
+        detector_title.setStyleSheet("""
+            font-size: 16px;
+            font-weight: bold;
+            color: #1F2937;
+            margin-top: 10px;
+        """)
+        detector_title.setAlignment(Qt.AlignHCenter)
+        detector_card_layout.addWidget(detector_title)
+        
+        # Card description
+        detector_desc = QLabel(detector_description)
+        detector_desc.setStyleSheet("""
+            font-size: 12px;
+            color: #6B7280;
+            margin-top: 5px;
+        """)
+        detector_desc.setWordWrap(True)
+        detector_desc.setAlignment(Qt.AlignHCenter)
+        detector_card_layout.addWidget(detector_desc)
+        
+        # Make the card clickable
+        detector_card.mousePressEvent = lambda event, detector_id=detector_id: self.select_detector(detector_id)
+        
+        return detector_card
     
-    def setup_surveillance_tab(self):
-        """Setup the surveillance tab with video display and event log."""
-        surveillance_widget = QWidget()
-        layout = QHBoxLayout()
+    def select_detector(self, detector_id):
+        """Handle detector selection."""
+        # Update selected detector
+        self.selected_detector_type = detector_id
         
-        # Left side - Video display
-        self.video_widget = VideoWidget()
-        self.video_widget.event_detected.connect(self.handle_event_detection)
-        layout.addWidget(self.video_widget, 3)  # 3:1 ratio
+        # Refresh the home tab to update the UI
+        current_index = self.tabs.currentIndex()
+        self.tabs.removeTab(0)  # Remove home tab
+        self.setup_home_tab()   # Recreate home tab
+        self.tabs.setCurrentIndex(current_index)  # Restore current tab
         
-        # Right side - Event log
-        self.event_logger = EventLogger()
-        layout.addWidget(self.event_logger, 1)  # 3:1 ratio
-        
-        surveillance_widget.setLayout(layout)
-        self.tabs.addTab(surveillance_widget, "Surveillance View")
-    
-    def setup_analytics_tab(self):
-        """Setup the analytics dashboard tab."""
-        # Create analytics dashboard instance
-        self.analytics_dashboard = AnalyticsDashboard()
-        
-        # Add to tabs
-        self.tabs.addTab(self.analytics_dashboard, "Analytics Dashboard")
+        # Show status message
+        detector_info = DetectorFactory.get_detector_info(detector_id)
+        self.status_bar.showMessage(f"Selected detector: {detector_info.get('name', 'Unknown')}")
     
     def select_video_file(self):
         """Open file dialog to select a video file."""
@@ -841,6 +931,17 @@ class MainWindow(QMainWindow):
         # Update video widget with ROI areas
         self.video_widget.set_roi_areas(roi_areas, roi_colors)
         
+        # Also set the selected detector type
+        self.video_widget.set_detector_type(self.selected_detector_type)
+        
+        # Update event logger with detector type
+        self.event_logger.set_detector_type(self.selected_detector_type)
+        
+        # Update event filter options based on detector
+        detector_info = DetectorFactory.get_detector_info(self.selected_detector_type)
+        event_types = detector_info.get("events", [])
+        self.event_logger.update_filter_options(event_types)
+        
         # If ROIs are defined, enable the surveillance tab
         if roi_areas:
             self.tabs.setTabEnabled(2, True)
@@ -860,13 +961,68 @@ class MainWindow(QMainWindow):
         else:
             self.tabs.setTabEnabled(2, False)
     
+    def focus_on_person(self, person_id):
+        """Focus the view on a specific person."""
+        # This would be implemented in the VideoWidget
+        # For now, just log
+        self.status_bar.showMessage(f"Focusing on person ID: {person_id}")
+    
     def handle_event_detection(self, event):
         """Handle events detected by the video widget."""
         # Add event to the event logger
         self.event_logger.add_event(event)
         
-        # Show status message
-        self.status_bar.showMessage(f"Event detected: {event['type']} - {event['description']}", 3000)
+        # Print debug info
+        print(f"Main window received event: {event['type']} - {event['description']}")
+        
+        # For high-priority events, show a status message
+        if event['type'] in [
+            'Potential Theft', 'Suspicious Item Grab', 
+            'Unauthorized Access', 'Item Taken', 
+            'Suspicious Movement', 'Long Dwell Time'
+        ]:
+            self.status_bar.showMessage(
+                f"ALERT: {event['type']} - {event['description']}", 
+                5000  # Show for 5 seconds
+            )
         
         # Also update analytics dashboard with current events list
-        self.analytics_dashboard.set_events(self.event_logger.get_events()) 
+        events = self.event_logger.get_events()
+        self.analytics_dashboard.set_events(events)
+    
+    def setup_roi_tab(self):
+        """Setup the ROI configuration tab."""
+        self.roi_widget = ROIWidget()
+        
+        # Connect signals
+        self.roi_widget.roi_updated.connect(self.update_roi_data)
+        
+        self.tabs.addTab(self.roi_widget, "ROI Configuration")
+    
+    def setup_surveillance_tab(self):
+        """Setup the surveillance tab with video display and event log."""
+        surveillance_widget = QWidget()
+        layout = QHBoxLayout()
+        
+        # Left side - Video display
+        self.video_widget = VideoWidget()
+        self.video_widget.event_detected.connect(self.handle_event_detection)
+        layout.addWidget(self.video_widget, 3)  # 3:1 ratio
+        
+        # Right side - Event log
+        self.event_logger = EventLogger()
+        layout.addWidget(self.event_logger, 1)  # 3:1 ratio
+        
+        # Connect the focus person signal to video widget
+        self.event_logger.focus_person.connect(self.focus_on_person)
+        
+        surveillance_widget.setLayout(layout)
+        self.tabs.addTab(surveillance_widget, "Surveillance View")
+    
+    def setup_analytics_tab(self):
+        """Setup the analytics dashboard tab."""
+        # Create analytics dashboard instance
+        self.analytics_dashboard = AnalyticsDashboard()
+        
+        # Add to tabs
+        self.tabs.addTab(self.analytics_dashboard, "Analytics Dashboard") 

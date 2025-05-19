@@ -5,13 +5,15 @@ import time
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, 
-    QFrame, QProgressBar, QSizePolicy, QSlider
+    QFrame, QProgressBar, QSizePolicy, QSlider, QComboBox
 )
 from PySide6.QtCore import QTimer, Qt, Signal, Slot, QSize
 from PySide6.QtGui import QImage, QPixmap, QFont, QColor, QPalette
 
 from app.components.detection.detector import YOLODetector
 from app.components.tracking.tracker import DeepSORTTracker
+from app.components.detection.event_detector_manager import EventDetectorManager
+from app.components.detection.detector_factory import DetectorFactory
 from app.utils.video_utils import get_frame_thumbnail
 
 class VideoWidget(QWidget):
@@ -297,6 +299,57 @@ class VideoWidget(QWidget):
         self.snapshot_button.clicked.connect(self.take_snapshot)
         self.controls_layout.addWidget(self.snapshot_button)
         
+        # Add event type selection dropdown
+        event_selector_container = QFrame()
+        event_selector_container.setStyleSheet("""
+            QFrame {
+                background-color: #F3F4F6;
+                border-radius: 8px;
+                padding: 8px;
+                margin-top: 5px;
+            }
+        """)
+        
+        event_selector_layout = QHBoxLayout(event_selector_container)
+        event_selector_layout.setContentsMargins(5, 5, 5, 5)
+        
+        event_type_label = QLabel("Event Detection Filter:")
+        event_type_label.setStyleSheet("""
+            font-size: 14px;
+            font-weight: bold;
+            color: #4B5563;
+        """)
+        event_selector_layout.addWidget(event_type_label)
+        
+        self.event_type_dropdown = QComboBox()
+        self.event_type_dropdown.setStyleSheet("""
+            QComboBox {
+                background-color: white;
+                border: 1px solid #D1D5DB;
+                border-radius: 4px;
+                padding: 5px;
+                min-width: 200px;
+                font-size: 14px;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: right;
+                width: 20px;
+                border-left: 1px solid #D1D5DB;
+            }
+        """)
+        
+        # Add event type options
+        self.event_type_dropdown.addItem("All Events", "all")
+        self.event_type_dropdown.addItem("Theft Detection", "theft_detector")
+        self.event_type_dropdown.addItem("Suspicious Movement", "suspicious_movement_detector")
+        self.event_type_dropdown.addItem("Entrance/Exit", "entrance_exit_detector")
+        
+        self.event_type_dropdown.currentIndexChanged.connect(self.on_event_type_changed)
+        event_selector_layout.addWidget(self.event_type_dropdown)
+        
+        self.layout.addWidget(event_selector_container)
+        
         self.layout.addWidget(controls_container)
         
         # Initialize variables
@@ -331,6 +384,20 @@ class VideoWidget(QWidget):
         # Initialize detector and tracker
         self.detector = YOLODetector()
         self.tracker = DeepSORTTracker()
+        
+        # Initialize event detector manager
+        self.event_detector_manager = EventDetectorManager()
+        
+        # Register the active detector directly
+        self.current_detector_type = "theft_detector"  # Default detector
+        detector = DetectorFactory.create_detector(self.current_detector_type)
+        if detector:
+            self.event_detector_manager.register_detector(self.current_detector_type, detector)
+            self.event_detector_manager.set_active_detector(self.current_detector_type)
+        
+        # Start async event processing
+        self.event_detector_manager.register_event_callback(self.handle_detected_event)
+        self.event_detector_manager.start_async_processing()
     
     def take_snapshot(self):
         """Save the current frame as an image file."""
@@ -437,10 +504,41 @@ class VideoWidget(QWidget):
         self.roi_areas = roi_areas
         self.roi_colors = roi_colors
         
+        # Update event detector manager with ROI information
+        self.event_detector_manager.set_roi_areas(roi_areas, roi_colors)
+        
         # Update display if we have a current frame
         if self.current_frame is not None:
             self.display_frame_with_annotations(self.current_frame)
     
+    def handle_detected_event(self, event):
+        """Handle events from the event detector manager."""
+        # Make sure the event has the required fields
+        required_fields = {'type', 'timestamp', 'description'}
+        for field in required_fields:
+            if field not in event:
+                print(f"Warning: Event missing required field: {field}")
+                if field == 'type':
+                    event['type'] = 'Unknown Event'
+                elif field == 'timestamp':
+                    event['timestamp'] = datetime.now().strftime('%H:%M:%S')
+                elif field == 'description':
+                    event['description'] = f"Event detected from {event.get('detector', 'unknown source')}"
+        
+        # Add frame count if missing
+        if 'frame_idx' not in event:
+            event['frame_idx'] = self.frame_count
+            
+        # Add thumbnail if missing
+        if 'thumbnail' not in event and self.current_frame is not None:
+            event['thumbnail'] = get_frame_thumbnail(self.current_frame)
+            
+        # Print event info for debugging
+        print(f"Detected event: {event['type']} - {event['description']}")
+            
+        # Emit the event to be captured by external components
+        self.event_detected.emit(event)
+            
     def toggle_play(self):
         """Toggle video playback and processing."""
         if not self.is_playing:
@@ -470,6 +568,10 @@ class VideoWidget(QWidget):
         if self.cap and self.cap.isOpened():
             self.cap.release()
             self.cap = None
+            
+        # Stop async event processing
+        if hasattr(self, 'event_detector_manager'):
+            self.event_detector_manager.stop_async_processing()
     
     def get_current_frame(self):
         """Get the current frame for use by other widgets."""
@@ -512,19 +614,24 @@ class VideoWidget(QWidget):
             # Update tracker
             tracks_updated = self.tracker.update(frame, detections)
             
-            # Process tracks
-            events = self.process_tracks(tracks_updated, frame, timestamp)
+            # Process events using the event detector manager
+            core_events = self.event_detector_manager.process_frame(
+                frame.copy(), tracks_updated, timestamp, self.frame_count
+            )
+            
+            # Log events generated directly from process_frame
+            for event in core_events:
+                self.handle_detected_event(event)
             
             # Update detection count
             self.detection_count = len(detections)
             self.detection_counter.setText(f"Detections: {self.detection_count}")
             
-            # Emit events if any
-            for event in events:
-                self.event_detected.emit(event)
-            
             # Draw annotations
-            processed_frame = self.draw_annotations(frame.copy(), tracks_updated, timestamp)
+            processed_frame = frame.copy()
+            
+            # Draw tracked objects
+            processed_frame = self.draw_annotations(processed_frame, tracks_updated, timestamp)
             
             # Display frame
             self.display_frame_with_annotations(processed_frame)
@@ -552,102 +659,6 @@ class VideoWidget(QWidget):
         
         # Store current frame
         self.current_frame = frame
-    
-    def process_tracks(self, tracks_updated, frame, timestamp):
-        """Process tracked objects to detect events."""
-        frame_events = []
-        
-        for track_id, bbox, class_id, confidence in tracks_updated:
-            x1, y1, x2, y2 = map(int, bbox)
-            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-            
-            # Get or create track data
-            track = self.tracks.setdefault(track_id, {
-                'frames': [],
-                'locations': [],
-                'class_id': class_id,
-                'roi_visits': {},
-                'last_roi': None,
-                'items_picked': []
-            })
-            
-            track['frames'].append(self.frame_count)
-            track['locations'].append((cx, cy))
-            
-            # Check ROI interactions
-            for roi_name, (rx1, ry1, rx2, ry2) in self.roi_areas.items():
-                in_roi = rx1 <= cx <= rx2 and ry1 <= cy <= ry2
-                
-                if in_roi:
-                    if roi_name not in track['roi_visits']:
-                        track['roi_visits'][roi_name] = {'enter_frame': self.frame_count, 'exit_frame': None}
-                        
-                        # Generate ROI transition event
-                        if track['last_roi'] != roi_name:
-                            event_data = {
-                                'type': 'ROI Transition',
-                                'timestamp': timestamp.strftime('%H:%M:%S'),
-                                'description': f"Object ID {track_id} entered {roi_name}",
-                                'thumbnail': get_frame_thumbnail(frame),
-                                'frame_idx': self.frame_count,
-                                'track_id': track_id,
-                                'from_roi': track['last_roi'],
-                                'to_roi': roi_name,
-                                'needs_reasoning': False
-                            }
-                            
-                            # Specialized events based on context
-                            if class_id == 0 and 'shelf' in roi_name.lower():
-                                event_data['type'] = 'Person at Shelf'
-                                event_data['description'] = f"Person ID {track_id} is browsing at {roi_name}"
-                            
-                            if class_id == 0 and track['last_roi'] and 'shelf' in track['last_roi'].lower() and 'exit' in roi_name.lower():
-                                event_data['type'] = 'Potential Theft'
-                                event_data['description'] = f"Person ID {track_id} moved from {track['last_roi']} directly to {roi_name}"
-                            
-                            # Item pickup events - check if a product is near a person
-                            if class_id > 0 and 'shelf' in roi_name.lower():
-                                for pid, pdata in self.tracks.items():
-                                    if pdata['class_id'] == 0 and self.frame_count in pdata['frames']:
-                                        pidx = pdata['frames'].index(self.frame_count)
-                                        px, py = pdata['locations'][pidx]
-                                        dist = np.hypot(cx - px, cy - py)
-                                        if dist < 100:
-                                            pickup_event = {
-                                                'type': 'Item Pickup',
-                                                'timestamp': timestamp.strftime('%H:%M:%S'),
-                                                'description': f"Item ID {track_id} picked up by Person ID {pid}",
-                                                'thumbnail': get_frame_thumbnail(frame),
-                                                'frame_idx': self.frame_count,
-                                                'item_id': track_id,
-                                                'person_id': pid,
-                                                'needs_reasoning': False
-                                            }
-                                            frame_events.append(pickup_event)
-                                            pdata['items_picked'].append(track_id)
-                                            break
-                            
-                            frame_events.append(event_data)
-                    
-                    track['last_roi'] = roi_name
-                    break
-                elif roi_name in track['roi_visits'] and track['roi_visits'][roi_name]['exit_frame'] is None:
-                    track['roi_visits'][roi_name]['exit_frame'] = self.frame_count
-                    
-                    # Generate ROI exit event
-                    exit_event = {
-                        'type': 'ROI Exit',
-                        'timestamp': timestamp.strftime('%H:%M:%S'),
-                        'description': f"Object ID {track_id} exited {roi_name}",
-                        'thumbnail': get_frame_thumbnail(frame),
-                        'frame_idx': self.frame_count,
-                        'track_id': track_id,
-                        'roi_name': roi_name,
-                        'needs_reasoning': False
-                    }
-                    frame_events.append(exit_event)
-        
-        return frame_events
     
     def draw_annotations(self, frame, tracks_updated, timestamp):
         """Draw bounding boxes, labels, and ROI areas on the frame."""
@@ -683,9 +694,14 @@ class VideoWidget(QWidget):
         cv2.putText(frame, f"Frame: {self.frame_count} | Time: {timestamp.strftime('%H:%M:%S')}",
                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
         
-        # Show event count
-        cv2.putText(frame, f"Events: {len(self.tracks)}", 
-                   (10, frame.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        # Apply annotations from event detectors
+        for detector_id in self.event_detector_manager.enabled_detectors:
+            detector = self.event_detector_manager.detectors.get(detector_id)
+            if detector and hasattr(detector, 'annotate_frame'):
+                try:
+                    frame = detector.annotate_frame(frame)
+                except Exception as e:
+                    print(f"Error annotating frame with detector {detector_id}: {e}")
         
         return frame
     
@@ -829,4 +845,75 @@ class VideoWidget(QWidget):
             # Store current frame
             self.current_frame = frame
         else:
-            print("Error seeking to frame") 
+            print("Error seeking to frame")
+
+    def on_event_type_changed(self, index):
+        """Handle changes to the event type dropdown."""
+        selected_data = self.event_type_dropdown.currentData()
+        print(f"Selected event type: {selected_data}")
+        
+        # Show user feedback about the change
+        self.timestamp_label.setText(f"Event filter: {self.event_type_dropdown.currentText()}")
+        self.timestamp_label.setStyleSheet("""
+            font-size: 14px;
+            font-weight: bold;
+            color: #3B82F6;
+        """)
+        # Reset style after 2 seconds
+        QTimer.singleShot(2000, self.reset_timestamp_style)
+
+    def set_detector_type(self, detector_type):
+        """Set the active detector type."""
+        # Skip if it's already the current detector
+        if detector_type == self.current_detector_type:
+            return True
+            
+        # Create the new detector
+        detector = DetectorFactory.create_detector(detector_type)
+        if not detector:
+            return False
+            
+        # Register the new detector
+        self.event_detector_manager.register_detector(detector_type, detector)
+        
+        # Set it as active
+        success = self.event_detector_manager.set_active_detector(detector_type)
+        if success:
+            self.current_detector_type = detector_type
+            
+            # Set ROI areas for new detector
+            if self.roi_areas:
+                detector.set_roi_areas(self.roi_areas, self.roi_colors)
+                
+            # Update UI to show the current detector
+            self.update_detector_ui()
+            
+        return success
+    
+    def update_detector_ui(self):
+        """Update UI to reflect the current detector type."""
+        # Get detector info
+        detector_info = DetectorFactory.get_detector_info(self.current_detector_type)
+        
+        # Update the event dropdown to show events for this detector
+        self.event_type_dropdown.blockSignals(True)
+        self.event_type_dropdown.clear()
+        
+        # Add "All Events" option first
+        self.event_type_dropdown.addItem("All Events", "all")
+        
+        # Add specific event types for this detector
+        for event_type in detector_info.get("events", []):
+            self.event_type_dropdown.addItem(event_type, event_type)
+            
+        self.event_type_dropdown.blockSignals(False)
+        
+        # Show current detector in UI
+        self.timestamp_label.setText(f"Active detector: {detector_info.get('name', 'Unknown')}")
+        self.timestamp_label.setStyleSheet("""
+            font-size: 14px;
+            font-weight: bold;
+            color: #3B82F6;
+        """)
+        # Reset style after 2 seconds
+        QTimer.singleShot(2000, self.reset_timestamp_style) 

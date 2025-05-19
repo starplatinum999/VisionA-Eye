@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QHBoxLayout, 
     QFrame, QPushButton, QSplitter, QComboBox
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QImage, QPixmap, QFont, QColor
 
 import cv2
@@ -83,6 +83,9 @@ class EventListItem(QWidget):
 class EventLogger(QWidget):
     """Widget for displaying and logging events detected by the video processing."""
     
+    # Signal to emit when focusing on a specific person
+    focus_person = Signal(int)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         
@@ -160,6 +163,7 @@ class EventLogger(QWidget):
         self.event_list = QListWidget()
         self.event_list.setSpacing(8)
         self.event_list.setStyleSheet("background-color: #E4E7EB; border: none;")
+        self.event_list.itemClicked.connect(self.on_event_clicked)
         
         self.scroll_area.setWidget(self.event_list)
         self.layout.addWidget(self.scroll_area)
@@ -214,6 +218,24 @@ class EventLogger(QWidget):
         # Initialize event list
         self.events = []
         self.current_filter = "All Events"
+        self.detector_type = None  # Current detector type
+    
+    def on_event_clicked(self, item):
+        """Handle clicking on an event to focus on the relevant person."""
+        index = self.event_list.row(item)
+        filtered_events = [e for e in self.events if self.current_filter == "All Events" or e['type'] == self.current_filter]
+        
+        if 0 <= index < len(filtered_events):
+            event = filtered_events[index]
+            if 'track_id' in event:
+                # Emit signal to focus on this person
+                self.focus_person.emit(event['track_id'])
+    
+    def set_detector_type(self, detector_type):
+        """Set the current detector type to filter events."""
+        self.detector_type = detector_type
+        # Clear existing events from other detectors
+        self.clear_events()
     
     def add_event(self, event):
         """Add a new event to the log."""
@@ -235,7 +257,11 @@ class EventLogger(QWidget):
         
         # Add events matching the filter
         for event in self.events:
-            if self.current_filter == "All Events" or event['type'] == self.current_filter:
+            # Check if this event should be shown based on filter
+            should_show = (self.current_filter == "All Events" or 
+                          event['type'] == self.current_filter)
+            
+            if should_show:
                 # Create a custom list item
                 item = QListWidgetItem()
                 event_widget = EventListItem(event)
@@ -256,6 +282,27 @@ class EventLogger(QWidget):
             self.event_count_label.setText(f"Events: {len(self.events)}")
         else:
             self.event_count_label.setText(f"Events: {filtered_count} of {len(self.events)} (filtered)")
+    
+    def update_filter_options(self, event_types):
+        """Update the filter dropdown with event types for the current detector."""
+        self.filter_combo.blockSignals(True)
+        self.filter_combo.clear()
+        
+        # Add "All Events" option
+        self.filter_combo.addItem("All Events")
+        
+        # Add specific event types
+        for event_type in event_types:
+            self.filter_combo.addItem(event_type)
+        
+        self.filter_combo.blockSignals(False)
+        
+        # Reset filter to "All Events"
+        self.current_filter = "All Events"
+        self.filter_combo.setCurrentIndex(0)
+        
+        # Apply filter
+        self.apply_filter()
     
     def clear_events(self):
         """Clear all events from the log."""
