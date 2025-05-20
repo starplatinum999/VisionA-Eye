@@ -32,28 +32,19 @@ if [[ $create_venv == "y" || $create_venv == "Y" ]]; then
     echo "✅ Virtual environment created and activated"
 fi
 
-# Install dependencies
-echo "Installing dependencies..."
-pip install -r requirements.txt
+# Install dependencies directly, bypassing some problematic build systems
+pip install --no-build-isolation PySide6 opencv-python numpy
+pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cpu
+pip install ultralytics
+pip install llama-cpp-python --no-cache-dir
 
-if [ $? -eq 0 ]; then
-    echo "✅ Dependencies installed successfully"
-else
-    echo "❌ Error installing dependencies"
-    exit 1
-fi
-
-# Create necessary directories
-echo "Creating directories..."
-mkdir -p app/data
+# Create model directories and download models manually
 mkdir -p app/models/yolo
 mkdir -p app/models/deep_sort
 mkdir -p app/models/llm
-echo "✅ Directories created"
 
-# Download models
-echo "Downloading models (this may take some time)..."
-$PYTHON_CMD -m app.utils.download_models
+# Download YOLOv8 model directly
+curl -L https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt -o app/models/yolo/yolov8n.pt
 
 if [ $? -eq 0 ]; then
     echo "✅ Models downloaded successfully"

@@ -18,6 +18,8 @@ class TheftDetector(BaseDetector):
     - Suspicious movements
     - Unauthorized access to restricted areas
     - Quick grabs of items
+    - Item concealment (realistic detection)
+    - Exit without checkout (realistic detection)
     """
     
     def __init__(self):
@@ -39,7 +41,9 @@ class TheftDetector(BaseDetector):
             "abandoned_object": "Unattended Item",
             "movement_pattern": "Suspicious Movement",
             "potential_theft": "Potential Theft",
-            "theft_in_progress": "Theft In Progress"
+            "theft_in_progress": "Theft In Progress",
+            "concealment": "Item Concealment",
+            "exit_without_checkout": "Exit Without Payment"
         }
         
         # Confidence threshold for generating events
@@ -141,6 +145,62 @@ class TheftDetector(BaseDetector):
         events = []
         timestamp_float = time.time()  # Current time in seconds
         
+        # Build detections list for the new theft detection logic
+        detections = []
+        for track_id, bbox, class_id, confidence in tracks:
+            detections.append({
+                'track_id': track_id,
+                'bbox': bbox,
+                'class_id': class_id,
+                'confidence': confidence
+            })
+            
+        # Prepare ROIs for the new detection logic
+        rois = {}
+        for roi_name, (x1, y1, x2, y2) in self.roi_areas.items():
+            x1_norm, y1_norm = x1/w, y1/h
+            x2_norm, y2_norm = x2/w, y2/h
+            rois[roi_name] = [
+                (x1_norm, y1_norm),
+                (x2_norm, y1_norm),
+                (x2_norm, y2_norm),
+                (x1_norm, y2_norm)
+            ]
+            
+        # Call the new update method for realistic detection
+        self.detector.update(detections, frame_count, rois)
+        
+        # Process alerts from realistic detection
+        for alert in self.detector.get_recent_alerts(5):
+            alert_type = alert.get('alert_type', '')
+            if alert_type in ['concealment', 'exit_without_checkout']:
+                # Check if we've already processed this alert
+                event_key = f"real_{alert_type}_{alert.get('track_id', -1)}"
+                last_event_time = self.recent_events.get(event_key, 0)
+                
+                if timestamp_float - last_event_time > self.event_cooldown:
+                    # Create event for realistic theft detection
+                    event_data = {
+                        'type': self.event_type_mapping.get(alert_type, "Potential Theft"),
+                        'timestamp': timestamp.strftime('%H:%M:%S'),
+                        'description': alert.get('message', ''),
+                        'frame_idx': frame_count,
+                        'track_id': alert.get('track_id', -1),
+                        'confidence': alert.get('confidence', 0.9),
+                        'alert_id': len(events) + 1,
+                        'needs_attention': True,
+                        'thumbnail': get_frame_thumbnail(frame)
+                    }
+                    
+                    if alert_type == 'concealment':
+                        event_data['item_id'] = alert.get('item_id')
+                    if alert_type == 'exit_without_checkout':
+                        event_data['item_ids'] = alert.get('item_ids')
+                        
+                    events.append(event_data)
+                    self.recent_events[event_key] = timestamp_float
+        
+        # Continue with existing detection logic
         # Process each tracked object
         for track_id, bbox, class_id, confidence in tracks:
             x1, y1, x2, y2 = map(int, bbox)
@@ -293,7 +353,7 @@ class TheftDetector(BaseDetector):
             stale_keys = [k for k, v in self.recent_events.items() if current_time - v > 60.0]
             for key in stale_keys:
                 del self.recent_events[key]
-            
+        
         return events
     
     def _create_event_from_alert(self, alert, track_id, frame, timestamp, frame_count):
@@ -401,4 +461,62 @@ class TheftDetector(BaseDetector):
         if not self.initialized or self.detector is None:
             return []
             
-        return self.detector.get_confirmed_thefts(count) 
+        return self.detector.get_confirmed_thefts(count)
+
+class RealWorldTheftDetector(TheftDetector):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.person_item_map = {}  # person_id -> set of item_ids
+        self.item_last_seen = {}   # item_id -> (frame, position, last_person_id)
+        self.person_bag_map = {}   # person_id -> bool (has bag)
+    
+    def update(self, detections, tracks, frame_idx, rois):
+        """
+        detections: list of dicts with keys: class_id, bbox, track_id
+        tracks: list of active tracks (person and items)
+        frame_idx: current frame number
+        rois: dict of ROI names to polygons
+        """
+        # 1. Associate items with persons (proximity)
+        for det in detections:
+            if det['class_id'] == PERSON_CLASS_ID:
+                person_id = det['track_id']
+                person_bbox = det['bbox']
+                # Check for bag
+                self.person_bag_map[person_id] = self._has_bag(person_id, detections)
+                # Check for nearby items
+                for item_det in detections:
+                    if item_det['class_id'] in ITEM_CLASS_IDS:
+                        item_id = item_det['track_id']
+                        item_bbox = item_det['bbox']
+                        if self._is_near(person_bbox, item_bbox):
+                            self.person_item_map.setdefault(person_id, set()).add(item_id)
+                            self.item_last_seen[item_id] = (frame_idx, item_bbox, person_id)
+        
+        # 2. Detect concealment (item disappears inside bag)
+        for person_id, item_ids in self.person_item_map.items():
+            if self.person_bag_map.get(person_id, False):
+                for item_id in list(item_ids):
+                    if not self._item_visible(item_id, detections):
+                        # If item was last seen overlapping with bag, flag as concealment
+                        if self._was_item_concealed(item_id, person_id):
+                            self._add_alert({
+                                'alert_type': 'concealment',
+                                'message': f"Person #{person_id} may have concealed item #{item_id} in a bag.",
+                                'track_id': person_id,
+                                'item_id': item_id,
+                                'confidence': 0.9
+                            })
+        
+        # 3. Detect exit without checkout
+        for person_id, item_ids in self.person_item_map.items():
+            if self._person_exited(person_id, rois) and not self._person_visited_cashier(person_id, rois):
+                self._add_alert({
+                    'alert_type': 'exit_without_checkout',
+                    'message': f"Person #{person_id} exited with items {list(item_ids)} without visiting cashier.",
+                    'track_id': person_id,
+                    'item_ids': list(item_ids),
+                    'confidence': 0.95
+                })
+    
+   

@@ -8,7 +8,7 @@ class TheftDetector:
     Utility class for detecting theft-related events.
     
     This class analyzes movement patterns, dwell times, and spatial relationships
-    to detect potential theft or suspicious behaviors.
+    to detect potential theft or suspicious behaviors, including more realistic scenarios such as concealment and exit without checkout.
     """
     
     def __init__(self, 
@@ -52,6 +52,71 @@ class TheftDetector:
         # Alert history
         self.recent_alerts = []
         self.max_alerts = 50
+        
+        self.person_item_map = {}  # person_id -> set of item_ids
+        self.item_last_seen = {}   # item_id -> (frame, position, last_person_id)
+        self.person_bag_map = {}   # person_id -> bool (has bag)
+        self.person_roi_history = {}  # person_id -> list of (roi_name, frame_idx)
+        self.item_roi_history = {}    # item_id -> list of (roi_name, frame_idx)
+        self.exit_roi_name = 'Exit'
+        self.cashier_roi_name = 'Cashier'
+        self.shelf_roi_names = ['Shelf1', 'Shelf2', 'Shelf3', 'Electronics', 'Jewelry', 'Clothing']
+        self.bag_class_ids = [24, 26, 27, 31]  # COCO: backpack, handbag, suitcase, etc.
+        self.person_class_id = 0  # COCO: person
+        self.item_class_ids = list(range(1, 24)) + list(range(25, 80))  # All non-person, non-bag
+    
+    def update(self, detections, frame_idx, rois):
+        """
+        Main update function for each frame.
+        
+        Args:
+            detections: list of dicts with keys: class_id, bbox, track_id
+            frame_idx: current frame number
+            rois: dict of ROI names to polygons
+        """
+        # 1. Associate items with persons (proximity)
+        for det in detections:
+            if det['class_id'] == self.person_class_id:
+                person_id = det['track_id']
+                person_bbox = det['bbox']
+                # Check for bag
+                self.person_bag_map[person_id] = self._has_bag(person_id, detections)
+                # Track ROI history
+                roi_name = self._get_current_roi(person_bbox, rois)
+                self.person_roi_history.setdefault(person_id, []).append((roi_name, frame_idx))
+                # Check for nearby items
+                for item_det in detections:
+                    if item_det['class_id'] in self.item_class_ids:
+                        item_id = item_det['track_id']
+                        item_bbox = item_det['bbox']
+                        if self._is_near(person_bbox, item_bbox):
+                            self.person_item_map.setdefault(person_id, set()).add(item_id)
+                            self.item_last_seen[item_id] = (frame_idx, item_bbox, person_id)
+                            self.item_roi_history.setdefault(item_id, []).append((roi_name, frame_idx))
+        # 2. Detect concealment (item disappears inside bag)
+        for person_id, item_ids in self.person_item_map.items():
+            if self.person_bag_map.get(person_id, False):
+                for item_id in list(item_ids):
+                    if not self._item_visible(item_id, detections):
+                        # If item was last seen overlapping with bag, flag as concealment
+                        if self._was_item_concealed(item_id, person_id, detections):
+                            self._add_alert({
+                                'alert_type': 'concealment',
+                                'message': f"Person #{person_id} may have concealed item #{item_id} in a bag.",
+                                'track_id': person_id,
+                                'item_id': item_id,
+                                'confidence': 0.9
+                            })
+        # 3. Detect exit without checkout
+        for person_id, item_ids in self.person_item_map.items():
+            if self._person_exited(person_id, rois) and not self._person_visited_cashier(person_id, rois):
+                self._add_alert({
+                    'alert_type': 'exit_without_checkout',
+                    'message': f"Person #{person_id} exited with items {list(item_ids)} without visiting cashier.",
+                    'track_id': person_id,
+                    'item_ids': list(item_ids),
+                    'confidence': 0.95
+                })
     
     def update_person_position(self, track_id, position, timestamp):
         """
@@ -409,3 +474,73 @@ class TheftDetector:
         x1, y1 = point1
         x2, y2 = point2
         return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 
+    
+    def _is_near(self, bbox1, bbox2, threshold=80):
+        # Compute center points and check distance
+        x1 = (bbox1[0] + bbox1[2]) / 2
+        y1 = (bbox1[1] + bbox1[3]) / 2
+        x2 = (bbox2[0] + bbox2[2]) / 2
+        y2 = (bbox2[1] + bbox2[3]) / 2
+        dist = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+        return dist < threshold
+    
+    def _has_bag(self, person_id, detections):
+        # Check if a bag/backpack is detected near the person
+        person_bbox = None
+        for det in detections:
+            if det['class_id'] == self.person_class_id and det['track_id'] == person_id:
+                person_bbox = det['bbox']
+                break
+        if person_bbox is None:
+            return False
+        for det in detections:
+            if det['class_id'] in self.bag_class_ids:
+                if self._is_near(person_bbox, det['bbox'], threshold=100):
+                    return True
+        return False
+    
+    def _item_visible(self, item_id, detections):
+        # Check if item_id is present in current detections
+        for det in detections:
+            if det['track_id'] == item_id:
+                return True
+        return False
+    
+    def _was_item_concealed(self, item_id, person_id, detections):
+        # Check if last seen position of item overlapped with person's bag
+        if item_id not in self.item_last_seen:
+            return False
+        _, item_bbox, _ = self.item_last_seen[item_id]
+        for det in detections:
+            if det['class_id'] in self.bag_class_ids and self._is_near(item_bbox, det['bbox'], threshold=60):
+                return True
+        return False
+    
+    def _get_current_roi(self, bbox, rois):
+        # Returns the name of the ROI the bbox is currently in, or None
+        x = (bbox[0] + bbox[2]) / 2
+        y = (bbox[1] + bbox[3]) / 2
+        for roi_name, polygon in rois.items():
+            if self._point_in_polygon((x, y), polygon):
+                return roi_name
+        return None
+    
+    def _person_exited(self, person_id, rois):
+        # Check if person's last ROI is exit
+        if person_id not in self.person_roi_history:
+            return False
+        for roi_name, _ in reversed(self.person_roi_history[person_id]):
+            if roi_name == self.exit_roi_name:
+                return True
+            elif roi_name is not None:
+                break  # Last ROI was not exit
+        return False
+    
+    def _person_visited_cashier(self, person_id, rois):
+        # Check if person's ROI history includes cashier
+        if person_id not in self.person_roi_history:
+            return False
+        for roi_name, _ in self.person_roi_history[person_id]:
+            if roi_name == self.cashier_roi_name:
+                return True
+        return False
